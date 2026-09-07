@@ -4,6 +4,7 @@ repo root for the full list and what each one does.
 """
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,18 @@ class Settings(BaseSettings):
     # Database / broker
     database_url: str = "postgresql+psycopg://tp_user:tp_password@localhost:5432/tp_manager"
     redis_url: str = "redis://localhost:6379/0"
+
+    @field_validator("database_url")
+    @classmethod
+    def _use_psycopg_driver(cls, v: str) -> str:
+        # Managed Postgres providers (Railway, Heroku, etc.) hand out plain
+        # "postgresql://" / "postgres://" URLs; SQLAlchemy then defaults to
+        # psycopg2, which isn't installed here (only psycopg v3 is).
+        if v.startswith("postgres://"):
+            v = "postgresql://" + v[len("postgres://") :]
+        if v.startswith("postgresql://"):
+            v = "postgresql+psycopg://" + v[len("postgresql://") :]
+        return v
 
     # CORS
     cors_origins: str = "http://localhost:3000"
