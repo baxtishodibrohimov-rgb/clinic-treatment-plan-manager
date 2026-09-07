@@ -1,26 +1,21 @@
 @import "tailwindcss";
 
+/*
+ * This app's UI is light-only (every component hardcodes bg-white /
+ * text-gray-900 etc.) — no dark theme has been designed. Force the color
+ * scheme so browsers/OSes with a dark-mode preference don't apply their own
+ * automatic dark-mode color adjustments on top of these light styles,
+ * which previously made text unreadable.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
