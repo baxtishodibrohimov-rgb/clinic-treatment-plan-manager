@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -29,6 +31,25 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Faqat admin uchun ruxsat")
     return user
+
+
+def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    if not user.is_super_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Faqat bosh administrator uchun ruxsat")
+    return user
+
+
+def clinic_scope(clinic_id: uuid.UUID | None = None, user: User = Depends(get_current_user)) -> uuid.UUID | None:
+    """Resolves which clinic's data an endpoint should return.
+
+    Non-super-admins are always locked to their own clinic (the `clinic_id`
+    query param, if any, is ignored for them). SUPER_ADMIN has no clinic of
+    their own — passing `?clinic_id=` scopes them to one clinic; omitting it
+    means "every clinic" (the caller must handle `None` as "no filter").
+    """
+    if user.is_super_admin:
+        return clinic_id
+    return user.clinic_id
 
 
 def require_role(*roles: Role):

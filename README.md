@@ -82,6 +82,30 @@ verified. `run_reminders_task` was run directly against seeded data and
 correctly marked overdue cases and queued escalation notifications exactly
 once per case (`ReminderSentLog` dedup).
 
+**Multi-clinic support.** Added after Phase 1–4: an unlimited number of
+`Clinic` rows (Settings → Filiallar, SUPER_ADMIN only), each with its own
+staff — every `User` (except SUPER_ADMIN, who has none and sees every
+clinic) and every `TreatmentPlanCase` belongs to exactly one clinic.
+Verified against a real Postgres with two demo clinics ("Bosh filial" /
+"2-filial", each with its own doctor + planners, seeded by `app/seed.py`):
+a clinic-scoped user's `/api/cases`, `/api/users` and dashboard stats only
+ever return their own clinic's rows (confirmed via direct API calls, not
+just UI); fetching another clinic's case by id 404s; assigning a case to a
+planner from a different clinic 400s; SUPER_ADMIN sees everything and can
+scope down via `?clinic_id=` (the frontend's clinic switcher in the
+sidebar) or create a clinic-scoped user via `/api/users` (which requires
+`clinic_id` unless the new user is itself SUPER_ADMIN). All clinics still
+share **one** Cliniccards account — there is no per-clinic API credential.
+`app/services/sync_service.py:resolve_clinic_for_appointment` is a
+best-effort placeholder (same caveat as the HTTP adapter below) that
+matches a `cliniccards_branch_code` configured per clinic against a few
+guessed raw-payload field names, falling back to whichever clinic is
+marked "standart"; update the field list once real Cliniccards API docs
+show what that field is actually called. A database migration
+(`08fe781ea38a`) backfills every pre-existing user/case into one
+auto-created "Bosh klinika" clinic, so upgrading an already-deployed
+single-clinic instance doesn't lose data.
+
 **Phases 5–12** are not built — the case detail page shows exactly what
 exists today (patient info, image gallery with required/missing badges,
 progress %, assignment, Master Problem List placeholder, audit log) and a

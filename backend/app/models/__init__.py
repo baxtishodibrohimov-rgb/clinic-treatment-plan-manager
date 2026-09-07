@@ -3,6 +3,7 @@ autogenerate and for `Base.metadata.create_all()` in tests."""
 from app.models.analysis import AnalysisAnswer, AnalysisTemplate, ImageAnnotation  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.case import ALLOWED_TRANSITIONS, TreatmentPlanCase  # noqa: F401
+from app.models.clinic import Clinic  # noqa: F401
 from app.models.cliniccards import CliniccardsAppointmentCache, CliniccardsPatientCache  # noqa: F401
 from app.models.dental import DentalChart, ToothStatus  # noqa: F401
 from app.models.finding import Finding  # noqa: F401

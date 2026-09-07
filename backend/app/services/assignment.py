@@ -21,17 +21,13 @@ from app.services.notifications import queue_notification
 ACTIVE_STATUSES = [s for s in CaseStatus if s not in (CaseStatus.READY, CaseStatus.CONSULTATION_COMPLETED)]
 
 
-def _eligible_planners(db: Session) -> list[User]:
-    return (
-        db.execute(
-            select(User)
-            .join(UserRole, UserRole.user_id == User.id)
-            .where(UserRole.role == Role.PLANNER, User.is_active.is_(True))
-        )
-        .scalars()
-        .unique()
-        .all()
+def _eligible_planners(db: Session, clinic_id: uuid.UUID | None) -> list[User]:
+    query = (
+        select(User)
+        .join(UserRole, UserRole.user_id == User.id)
+        .where(UserRole.role == Role.PLANNER, User.is_active.is_(True), User.clinic_id == clinic_id)
     )
+    return db.execute(query).scalars().unique().all()
 
 
 def _workload_by_planner(db: Session) -> dict[uuid.UUID, int]:
@@ -69,7 +65,7 @@ def auto_assign_planner(db: Session, case: TreatmentPlanCase) -> User | None:
     if not config or config.mode != AssignmentMode.AUTO:
         return None
 
-    planners = _eligible_planners(db)
+    planners = _eligible_planners(db, case.clinic_id)
     if not planners:
         return None
 

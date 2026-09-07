@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { api } from "@/lib/api";
+import { getScopeClinicId, setScopeClinicId } from "@/lib/clinic-scope";
+import type { ClinicOut } from "@/lib/types";
 
 const ADMIN_NAV = [
   { href: "/admin/staff", label: "Planner/Doctor rollari" },
@@ -12,8 +15,42 @@ const ADMIN_NAV = [
   { href: "/admin/settings", label: "Sozlamalar" },
 ];
 
+const SUPER_ADMIN_NAV = [{ href: "/admin/clinics", label: "Filiallar" }];
+
+function ClinicSwitcher() {
+  const [clinics, setClinics] = useState<ClinicOut[]>([]);
+  const [value, setValue] = useState("");
+
+  useEffect(() => {
+    setValue(getScopeClinicId() ?? "");
+    api
+      .get<ClinicOut[]>("/api/clinics")
+      .then(setClinics)
+      .catch(() => {});
+  }, []);
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => {
+        setValue(e.target.value);
+        setScopeClinicId(e.target.value || null);
+        window.location.reload();
+      }}
+      className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs"
+    >
+      <option value="">Barcha filiallar</option>
+      {clinics.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
-  const { user, loading, isAdmin, logout } = useAuth();
+  const { user, loading, isAdmin, isSuperAdmin, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -28,7 +65,16 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col">
-        <div className="px-4 py-4 font-semibold text-lg border-b border-gray-200">Treatment Plan Manager</div>
+        <div className="px-4 py-4 border-b border-gray-200">
+          <div className="font-semibold text-lg">Treatment Plan Manager</div>
+          {isSuperAdmin ? (
+            <div className="mt-2">
+              <ClinicSwitcher />
+            </div>
+          ) : (
+            <div className="mt-1 text-xs font-medium text-blue-700">{user.clinic?.name ?? "Filial belgilanmagan"}</div>
+          )}
+        </div>
         <nav className="flex-1 px-2 py-3 space-y-1">
           <Link
             href="/dashboard"
@@ -39,7 +85,7 @@ export function Shell({ children }: { children: ReactNode }) {
           {isAdmin && (
             <>
               <div className="pt-3 pb-1 px-3 text-xs font-semibold uppercase text-gray-400">Sozlamalar</div>
-              {ADMIN_NAV.map((item) => (
+              {[...(isSuperAdmin ? SUPER_ADMIN_NAV : []), ...ADMIN_NAV].map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}

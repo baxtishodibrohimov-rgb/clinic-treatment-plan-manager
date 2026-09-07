@@ -9,13 +9,26 @@ from datetime import datetime, timedelta, timezone
 
 from app.database import SessionLocal
 from app.models.case import TreatmentPlanCase
+from app.models.clinic import Clinic
 from app.models.cliniccards import CliniccardsAppointmentCache, CliniccardsPatientCache
 from app.models.enums import CaseStatus, Role
 from app.models.user import User, UserRole
 from app.security.passwords import hash_password
 
 
-def get_or_create_user(db, *, email, full_name, telegram_id, roles, max_workload=None) -> User:
+def get_or_create_clinic(db, *, name, is_default=False) -> Clinic:
+    clinic = db.query(Clinic).filter(Clinic.name == name).one_or_none()
+    if clinic:
+        return clinic
+    if is_default:
+        db.query(Clinic).update({"is_default": False})
+    clinic = Clinic(name=name, is_default=is_default)
+    db.add(clinic)
+    db.flush()
+    return clinic
+
+
+def get_or_create_user(db, *, email, full_name, telegram_id, roles, clinic=None, max_workload=None) -> User:
     user = db.query(User).filter(User.email == email).one_or_none()
     if user:
         return user
@@ -25,6 +38,7 @@ def get_or_create_user(db, *, email, full_name, telegram_id, roles, max_workload
         full_name=full_name,
         telegram_id=telegram_id,
         max_workload=max_workload,
+        clinic_id=clinic.id if clinic else None,
     )
     db.add(user)
     db.flush()
@@ -69,12 +83,13 @@ def get_or_create_appointment(db, *, appointment_id, patient_id, doctor_name, sc
     return row
 
 
-def get_or_create_case(db, *, appointment_id, patient_id, doctor, doctor_name, planner, status, consultation_at, deadline, progress) -> None:
+def get_or_create_case(db, *, appointment_id, patient_id, clinic, doctor, doctor_name, planner, status, consultation_at, deadline, progress) -> None:
     existing = db.query(TreatmentPlanCase).filter(TreatmentPlanCase.cliniccards_appointment_id == appointment_id).one_or_none()
     if existing:
         return
     db.add(
         TreatmentPlanCase(
+            clinic_id=clinic.id if clinic else None,
             cliniccards_patient_id=patient_id,
             cliniccards_appointment_id=appointment_id,
             consultation_datetime=consultation_at,
@@ -95,12 +110,20 @@ def run() -> None:
             db, email="admin@clinic.local", full_name="Super Admin", telegram_id=None, roles=[Role.SUPER_ADMIN]
         )
 
-        planner1 = get_or_create_user(db, email="planner1@clinic.local", full_name="Dilshod Rahimov", telegram_id=900000001, roles=[Role.PLANNER], max_workload=6)
-        planner2 = get_or_create_user(db, email="planner2@clinic.local", full_name="Kamola Yusupova", telegram_id=900000002, roles=[Role.PLANNER], max_workload=6)
-        planner3 = get_or_create_user(db, email="planner3@clinic.local", full_name="Bekzod Nazarov", telegram_id=900000003, roles=[Role.PLANNER], max_workload=4)
+        # Two demo clinics/branches, each with its own staff — demonstrates
+        # the multi-clinic scoping (spec: "har bir klinika" / "har bir
+        # xodim bitta filialga"). All clinics still share one Cliniccards
+        # account; see app/services/sync_service.py for how real synced
+        # appointments get split between clinics.
+        clinic_a = get_or_create_clinic(db, name="Bosh filial", is_default=True)
+        clinic_b = get_or_create_clinic(db, name="2-filial")
 
-        doctor1 = get_or_create_user(db, email="doctor1@clinic.local", full_name="Dr. Aziz Karimov", telegram_id=900000011, roles=[Role.DOCTOR])
-        doctor2 = get_or_create_user(db, email="doctor2@clinic.local", full_name="Dr. Nilufar Rashidova", telegram_id=900000012, roles=[Role.DOCTOR])
+        planner1 = get_or_create_user(db, email="planner1@clinic.local", full_name="Dilshod Rahimov", telegram_id=900000001, roles=[Role.PLANNER], clinic=clinic_a, max_workload=6)
+        planner2 = get_or_create_user(db, email="planner2@clinic.local", full_name="Kamola Yusupova", telegram_id=900000002, roles=[Role.PLANNER], clinic=clinic_a, max_workload=6)
+        planner3 = get_or_create_user(db, email="planner3@clinic.local", full_name="Bekzod Nazarov", telegram_id=900000003, roles=[Role.PLANNER], clinic=clinic_b, max_workload=4)
+
+        doctor1 = get_or_create_user(db, email="doctor1@clinic.local", full_name="Dr. Aziz Karimov", telegram_id=900000011, roles=[Role.DOCTOR], clinic=clinic_a)
+        doctor2 = get_or_create_user(db, email="doctor2@clinic.local", full_name="Dr. Nilufar Rashidova", telegram_id=900000012, roles=[Role.DOCTOR], clinic=clinic_b)
 
         patients = [
             get_or_create_patient(db, patient_id="DEMO-P1", full_name="Dilnoza Yusupova", birth_date="2005-03-12", phone="+998901234501"),
@@ -117,7 +140,7 @@ def run() -> None:
             get_or_create_appointment(db, appointment_id="DEMO-A2", patient_id="DEMO-P2", doctor_name=doctor1.full_name, scheduled_at=now + timedelta(days=1)),
             get_or_create_appointment(db, appointment_id="DEMO-A3", patient_id="DEMO-P3", doctor_name=doctor2.full_name, scheduled_at=now + timedelta(days=2)),
             get_or_create_appointment(db, appointment_id="DEMO-A4", patient_id="DEMO-P4", doctor_name=doctor2.full_name, scheduled_at=now + timedelta(days=3)),
-            get_or_create_appointment(db, appointment_id="DEMO-A5", patient_id="DEMO-P5", doctor_name=doctor1.full_name, scheduled_at=now + timedelta(days=4)),
+            get_or_create_appointment(db, appointment_id="DEMO-A5", patient_id="DEMO-P5", doctor_name=doctor2.full_name, scheduled_at=now + timedelta(days=4)),
             get_or_create_appointment(db, appointment_id="DEMO-A6", patient_id="DEMO-P1", doctor_name=doctor1.full_name, scheduled_at=now + timedelta(days=5)),
             get_or_create_appointment(db, appointment_id="DEMO-A7", patient_id="DEMO-P2", doctor_name=doctor2.full_name, scheduled_at=now + timedelta(days=6)),
             get_or_create_appointment(db, appointment_id="DEMO-A8", patient_id="DEMO-P3", doctor_name=doctor1.full_name, scheduled_at=now + timedelta(hours=1)),
@@ -126,17 +149,19 @@ def run() -> None:
         ]
         db.flush()
 
+        # Each case's doctor/planner belong to the same clinic as the case
+        # itself — a case can never mix staff from two different clinics.
         cases = [
-            dict(appointment_id="DEMO-A1", patient_id="DEMO-P1", doctor=doctor1, planner=None, status=CaseStatus.NEW, consultation_at=now + timedelta(hours=6), deadline=now - timedelta(hours=18), progress=0),
-            dict(appointment_id="DEMO-A2", patient_id="DEMO-P2", doctor=doctor1, planner=None, status=CaseStatus.WAITING_ASSIGNMENT, consultation_at=now + timedelta(days=1), deadline=now + timedelta(hours=1), progress=0),
-            dict(appointment_id="DEMO-A3", patient_id="DEMO-P3", doctor=doctor2, planner=planner1, status=CaseStatus.ASSIGNED, consultation_at=now + timedelta(days=2), deadline=now + timedelta(days=1), progress=20),
-            dict(appointment_id="DEMO-A4", patient_id="DEMO-P4", doctor=doctor2, planner=planner2, status=CaseStatus.IMAGES_READY, consultation_at=now + timedelta(days=3), deadline=now + timedelta(days=2), progress=100),
-            dict(appointment_id="DEMO-A5", patient_id="DEMO-P5", doctor=doctor1, planner=planner3, status=CaseStatus.ANALYSIS_IN_PROGRESS, consultation_at=now + timedelta(days=4), deadline=now + timedelta(days=3), progress=100),
-            dict(appointment_id="DEMO-A6", patient_id="DEMO-P1", doctor=doctor1, planner=planner1, status=CaseStatus.PLAN_IN_PROGRESS, consultation_at=now + timedelta(days=5), deadline=now + timedelta(days=4), progress=100),
-            dict(appointment_id="DEMO-A7", patient_id="DEMO-P2", doctor=doctor2, planner=planner2, status=CaseStatus.REVIEW_REQUIRED, consultation_at=now + timedelta(days=6), deadline=now + timedelta(days=5), progress=100),
-            dict(appointment_id="DEMO-A8", patient_id="DEMO-P3", doctor=doctor1, planner=planner3, status=CaseStatus.READY, consultation_at=now + timedelta(hours=1), deadline=now - timedelta(hours=23), progress=100),
-            dict(appointment_id="DEMO-A9", patient_id="DEMO-P4", doctor=doctor2, planner=planner1, status=CaseStatus.CONSULTATION_COMPLETED, consultation_at=now - timedelta(days=1), deadline=now - timedelta(days=2), progress=100),
-            dict(appointment_id="DEMO-A10", patient_id="DEMO-P5", doctor=doctor1, planner=planner2, status=CaseStatus.OVERDUE, consultation_at=now - timedelta(days=3), deadline=now - timedelta(days=4), progress=40),
+            dict(appointment_id="DEMO-A1", patient_id="DEMO-P1", clinic=clinic_a, doctor=doctor1, planner=None, status=CaseStatus.NEW, consultation_at=now + timedelta(hours=6), deadline=now - timedelta(hours=18), progress=0),
+            dict(appointment_id="DEMO-A2", patient_id="DEMO-P2", clinic=clinic_a, doctor=doctor1, planner=None, status=CaseStatus.WAITING_ASSIGNMENT, consultation_at=now + timedelta(days=1), deadline=now + timedelta(hours=1), progress=0),
+            dict(appointment_id="DEMO-A6", patient_id="DEMO-P1", clinic=clinic_a, doctor=doctor1, planner=planner1, status=CaseStatus.PLAN_IN_PROGRESS, consultation_at=now + timedelta(days=5), deadline=now + timedelta(days=4), progress=100),
+            dict(appointment_id="DEMO-A8", patient_id="DEMO-P3", clinic=clinic_a, doctor=doctor1, planner=planner2, status=CaseStatus.READY, consultation_at=now + timedelta(hours=1), deadline=now - timedelta(hours=23), progress=100),
+            dict(appointment_id="DEMO-A10", patient_id="DEMO-P5", clinic=clinic_a, doctor=doctor1, planner=planner1, status=CaseStatus.OVERDUE, consultation_at=now - timedelta(days=3), deadline=now - timedelta(days=4), progress=40),
+            dict(appointment_id="DEMO-A3", patient_id="DEMO-P3", clinic=clinic_b, doctor=doctor2, planner=planner3, status=CaseStatus.ASSIGNED, consultation_at=now + timedelta(days=2), deadline=now + timedelta(days=1), progress=20),
+            dict(appointment_id="DEMO-A4", patient_id="DEMO-P4", clinic=clinic_b, doctor=doctor2, planner=planner3, status=CaseStatus.IMAGES_READY, consultation_at=now + timedelta(days=3), deadline=now + timedelta(days=2), progress=100),
+            dict(appointment_id="DEMO-A5", patient_id="DEMO-P5", clinic=clinic_b, doctor=doctor2, planner=planner3, status=CaseStatus.ANALYSIS_IN_PROGRESS, consultation_at=now + timedelta(days=4), deadline=now + timedelta(days=3), progress=100),
+            dict(appointment_id="DEMO-A7", patient_id="DEMO-P2", clinic=clinic_b, doctor=doctor2, planner=planner3, status=CaseStatus.REVIEW_REQUIRED, consultation_at=now + timedelta(days=6), deadline=now + timedelta(days=5), progress=100),
+            dict(appointment_id="DEMO-A9", patient_id="DEMO-P4", clinic=clinic_b, doctor=doctor2, planner=planner3, status=CaseStatus.CONSULTATION_COMPLETED, consultation_at=now - timedelta(days=1), deadline=now - timedelta(days=2), progress=100),
         ]
 
         for c in cases:
@@ -144,6 +169,7 @@ def run() -> None:
                 db,
                 appointment_id=c["appointment_id"],
                 patient_id=c["patient_id"],
+                clinic=c["clinic"],
                 doctor=c["doctor"],
                 doctor_name=c["doctor"].full_name,
                 planner=c["planner"],
@@ -154,7 +180,7 @@ def run() -> None:
             )
 
         db.commit()
-        print("Seeded: 1 super admin, 3 planners, 2 doctors, 5 patients, 10 cases.")
+        print("Seeded: 2 clinics, 1 super admin, 3 planners, 2 doctors, 5 patients, 10 cases.")
         print("Login: admin@clinic.local / password123 (change this in production!)")
     finally:
         db.close()

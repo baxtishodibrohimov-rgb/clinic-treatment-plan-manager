@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import TokenResponse, UserOut
+from app.schemas.clinic import ClinicOut
 from app.security.deps import get_current_user
 from app.security.jwt import create_access_token
 from app.security.passwords import verify_password
@@ -22,6 +23,7 @@ def user_to_out(user: User) -> UserOut:
         is_active=user.is_active,
         max_workload=user.max_workload,
         roles=sorted({r.role for r in user.roles}, key=lambda r: r.value),
+        clinic=ClinicOut.model_validate(user.clinic) if user.clinic else None,
     )
 
 

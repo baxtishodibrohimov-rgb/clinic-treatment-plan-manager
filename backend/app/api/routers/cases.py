@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.case import TreatmentPlanCase
+from app.models.clinic import Clinic
 from app.models.cliniccards import CliniccardsPatientCache
 from app.models.enums import CaseStatus, ReviewDecision, Role
 from app.models.image import ClinicalImage, ImageType
@@ -25,7 +26,7 @@ from app.schemas.case import (
     PatientSummary,
     ReviewRequest,
 )
-from app.security.deps import get_current_user, require_admin, require_role
+from app.security.deps import clinic_scope, get_current_user, require_admin, require_role
 from app.services.case_service import assign_case, submit_review
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
@@ -50,9 +51,13 @@ def _bulk_names(db: Session, cases: list[TreatmentPlanCase]) -> tuple[dict[str, 
 
 
 @router.get("", response_model=list[CaseListItem], dependencies=[Depends(get_current_user)])
-def list_cases(db: Session = Depends(get_db)) -> list[CaseListItem]:
-    cases = db.execute(select(TreatmentPlanCase).order_by(TreatmentPlanCase.consultation_datetime)).scalars().all()
+def list_cases(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | None = Depends(clinic_scope)) -> list[CaseListItem]:
+    query = select(TreatmentPlanCase).order_by(TreatmentPlanCase.consultation_datetime)
+    if scope_clinic_id is not None:
+        query = query.where(TreatmentPlanCase.clinic_id == scope_clinic_id)
+    cases = db.execute(query).scalars().all()
     patient_names, user_names = _bulk_names(db, cases)
+    clinic_names = {c.id: c.name for c in db.execute(select(Clinic)).scalars().all()}
 
     return [
         CaseListItem(
@@ -65,14 +70,19 @@ def list_cases(db: Session = Depends(get_db)) -> list[CaseListItem]:
             patient_name=patient_names.get(c.cliniccards_patient_id, "Noma'lum bemor"),
             doctor_name=c.primary_doctor_name or (user_names.get(c.primary_doctor_user_id) if c.primary_doctor_user_id else None),
             planner_name=user_names.get(c.responsible_planner_user_id) if c.responsible_planner_user_id else None,
+            clinic_id=c.clinic_id,
+            clinic_name=clinic_names.get(c.clinic_id) if c.clinic_id else None,
         )
         for c in cases
     ]
 
 
 @router.get("/dashboard-stats", response_model=DashboardStats, dependencies=[Depends(get_current_user)])
-def dashboard_stats(db: Session = Depends(get_db)) -> DashboardStats:
-    cases = db.execute(select(TreatmentPlanCase)).scalars().all()
+def dashboard_stats(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | None = Depends(clinic_scope)) -> DashboardStats:
+    query = select(TreatmentPlanCase)
+    if scope_clinic_id is not None:
+        query = query.where(TreatmentPlanCase.clinic_id == scope_clinic_id)
+    cases = db.execute(query).scalars().all()
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
@@ -91,16 +101,18 @@ def dashboard_stats(db: Session = Depends(get_db)) -> DashboardStats:
     )
 
 
-def _get_case_or_404(db: Session, case_id: uuid.UUID) -> TreatmentPlanCase:
+def _get_case_or_404(db: Session, case_id: uuid.UUID, user: User) -> TreatmentPlanCase:
     case = db.get(TreatmentPlanCase, case_id)
     if not case:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Case topilmadi")
+    if not user.is_super_admin and case.clinic_id != user.clinic_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Case topilmadi")
     return case
 
 
-@router.get("/{case_id}", response_model=CaseDetail, dependencies=[Depends(get_current_user)])
-def get_case(case_id: uuid.UUID, db: Session = Depends(get_db)) -> CaseDetail:
-    case = _get_case_or_404(db, case_id)
+@router.get("/{case_id}", response_model=CaseDetail)
+def get_case(case_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> CaseDetail:
+    case = _get_case_or_404(db, case_id, user)
 
     patient = db.execute(
         select(CliniccardsPatientCache).where(CliniccardsPatientCache.cliniccards_patient_id == case.cliniccards_patient_id)
@@ -141,10 +153,12 @@ def get_case(case_id: uuid.UUID, db: Session = Depends(get_db)) -> CaseDetail:
 
 @router.post("/{case_id}/assign", status_code=status.HTTP_204_NO_CONTENT)
 def assign(case_id: uuid.UUID, payload: AssignCaseRequest, db: Session = Depends(get_db), user: User = Depends(require_admin)) -> None:
-    case = _get_case_or_404(db, case_id)
+    case = _get_case_or_404(db, case_id, user)
     planner = db.get(User, payload.planner_user_id)
     if not planner or Role.PLANNER not in planner.role_names:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tanlangan foydalanuvchi planner emas")
+    if planner.clinic_id != case.clinic_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Planner boshqa klinikaga tegishli")
     assign_case(db, case, payload.planner_user_id, actor_user_id=user.id, note=payload.note)
     db.commit()
 
@@ -156,7 +170,7 @@ def review(
     db: Session = Depends(get_db),
     user: User = Depends(require_role(Role.DOCTOR)),
 ) -> None:
-    case = _get_case_or_404(db, case_id)
+    case = _get_case_or_404(db, case_id, user)
     try:
         decision = ReviewDecision(payload.decision)
     except ValueError:

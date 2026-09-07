@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { api } from "@/lib/api";
+import { onScopeClinicChange, withClinicScope } from "@/lib/clinic-scope";
+import { useAuth } from "@/lib/auth-context";
 import type { CaseListItem, CaseStatus, DashboardStats } from "@/lib/types";
 
 const STATUS_COLUMNS: { status: CaseStatus; label: string }[] = [
@@ -32,14 +34,15 @@ function timeLeftLabel(iso: string | null): string {
 }
 
 export default function DashboardPage() {
+  const { isSuperAdmin } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [cases, setCases] = useState<CaseListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     const [s, c] = await Promise.all([
-      api.get<DashboardStats>("/api/cases/dashboard-stats"),
-      api.get<CaseListItem[]>("/api/cases"),
+      api.get<DashboardStats>(withClinicScope("/api/cases/dashboard-stats")),
+      api.get<CaseListItem[]>(withClinicScope("/api/cases")),
     ]);
     setStats(s);
     setCases(c);
@@ -50,7 +53,11 @@ export default function DashboardPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
     const interval = setInterval(() => load().catch(() => {}), 30_000);
-    return () => clearInterval(interval);
+    const unsubscribe = onScopeClinicChange(() => load().catch(() => {}));
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, []);
 
   const statCards = stats
@@ -98,6 +105,9 @@ export default function DashboardPage() {
                       className="block rounded-md border border-gray-200 bg-white p-3 hover:border-blue-400 transition-colors"
                     >
                       <div className="text-sm font-medium">{c.patient_name}</div>
+                      {isSuperAdmin && c.clinic_name && (
+                        <div className="text-[10px] font-medium uppercase text-blue-600">{c.clinic_name}</div>
+                      )}
                       <div className="text-xs text-gray-500">{timeLeftLabel(c.consultation_datetime)}</div>
                       <div className="text-xs text-gray-500">Dr: {c.doctor_name ?? "—"}</div>
                       <div className="text-xs text-gray-500">Planner: {c.planner_name ?? "—"}</div>

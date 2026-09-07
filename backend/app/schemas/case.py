@@ -23,6 +23,8 @@ class CaseListItem(BaseModel):
     patient_name: str
     doctor_name: str | None
     planner_name: str | None
+    clinic_id: uuid.UUID | None = None
+    clinic_name: str | None = None
 
 
 class ImageTypeOut(BaseModel):

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.models.base import TimestampMixin, UUIDPKMixin
+from app.models.clinic import Clinic
 from app.models.enums import Role
 
 role_enum = PGEnum(Role, name="role", create_type=True, values_callable=lambda enum_cls: [member.value for member in enum_cls])
@@ -27,8 +28,15 @@ class User(Base, UUIDPKMixin, TimestampMixin):
     telegram_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     max_workload: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # NULL only for SUPER_ADMIN (sees/manages every clinic); every other
+    # role belongs to exactly one clinic — enforced in the service layer,
+    # not a DB constraint, since that depends on the user's roles.
+    clinic_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clinics.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     roles: Mapped[list["UserRole"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    clinic: Mapped["Clinic | None"] = relationship(lazy="joined")
 
     @property
     def role_names(self) -> set[Role]:

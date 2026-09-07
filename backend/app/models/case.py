@@ -42,6 +42,12 @@ ALLOWED_TRANSITIONS: dict[CaseStatus, set[CaseStatus]] = {
 class TreatmentPlanCase(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "cases"
 
+    # Nullable at the DB level only so the migration can backfill existing
+    # rows; every case created going forward gets one from
+    # app.services.sync_service.resolve_clinic_for_appointment.
+    clinic_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("clinics.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     cliniccards_patient_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("cliniccards_patients.cliniccards_patient_id"), nullable=False, index=True
     )

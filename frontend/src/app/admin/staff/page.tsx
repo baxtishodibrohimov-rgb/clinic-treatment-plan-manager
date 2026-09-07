@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { Shell } from "@/components/shell";
 import { api, ApiError } from "@/lib/api";
-import type { Role, UserOut } from "@/lib/types";
+import { useAuth } from "@/lib/auth-context";
+import { onScopeClinicChange, withClinicScope } from "@/lib/clinic-scope";
+import type { ClinicOut, Role, UserOut } from "@/lib/types";
 
 const TP_ROLES: Role[] = ["planner", "doctor", "consultant"];
 
-function StaffRow({ user, onSaved }: { user: UserOut; onSaved: () => void }) {
+function StaffRow({ user, showClinic, onSaved }: { user: UserOut; showClinic: boolean; onSaved: () => void }) {
   const [roles, setRoles] = useState<Set<Role>>(new Set(user.roles));
   const [maxWorkload, setMaxWorkload] = useState<string>(user.max_workload?.toString() ?? "");
   const [saving, setSaving] = useState(false);
@@ -38,6 +40,7 @@ function StaffRow({ user, onSaved }: { user: UserOut; onSaved: () => void }) {
     <tr className="border-b border-gray-100">
       <td className="px-3 py-2 font-medium">{user.full_name}</td>
       <td className="px-3 py-2 text-gray-500">{user.email}</td>
+      {showClinic && <td className="px-3 py-2 text-gray-500">{user.clinic?.name ?? "—"}</td>}
       {TP_ROLES.map((role) => (
         <td key={role} className="px-3 py-2 text-center">
           <input type="checkbox" checked={roles.has(role)} onChange={(e) => toggle(role, e.target.checked)} />
@@ -66,14 +69,16 @@ function StaffRow({ user, onSaved }: { user: UserOut; onSaved: () => void }) {
 }
 
 export default function StaffPage() {
+  const { isSuperAdmin } = useAuth();
   const [users, setUsers] = useState<UserOut[]>([]);
+  const [clinics, setClinics] = useState<ClinicOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ email: "", password: "", full_name: "", telegram_id: "", roles: [] as Role[] });
+  const [form, setForm] = useState({ email: "", password: "", full_name: "", telegram_id: "", roles: [] as Role[], clinic_id: "" });
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    const data = await api.get<UserOut[]>("/api/users");
+    const data = await api.get<UserOut[]>(withClinicScope("/api/users"));
     setUsers(data);
   };
 
@@ -81,7 +86,18 @@ export default function StaffPage() {
     load()
       .catch(() => {})
       .finally(() => setLoading(false));
+    const unsubscribe = onScopeClinicChange(() => load().catch(() => {}));
+    return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      api
+        .get<ClinicOut[]>("/api/clinics")
+        .then(setClinics)
+        .catch(() => {});
+    }
+  }, [isSuperAdmin]);
 
   const createUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,9 +106,10 @@ export default function StaffPage() {
       await api.post("/api/users", {
         ...form,
         telegram_id: form.telegram_id ? Number(form.telegram_id) : null,
+        clinic_id: form.clinic_id || null,
       });
       setShowCreate(false);
-      setForm({ email: "", password: "", full_name: "", telegram_id: "", roles: [] });
+      setForm({ email: "", password: "", full_name: "", telegram_id: "", roles: [], clinic_id: "" });
       await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Xatolik");
@@ -123,6 +140,21 @@ export default function StaffPage() {
               <input required type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
               <input required type="password" placeholder="Parol" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
               <input placeholder="Telegram ID" value={form.telegram_id} onChange={(e) => setForm({ ...form, telegram_id: e.target.value })} className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              {isSuperAdmin && (
+                <select
+                  required
+                  value={form.clinic_id}
+                  onChange={(e) => setForm({ ...form, clinic_id: e.target.value })}
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                >
+                  <option value="">Filialni tanlang</option>
+                  {clinics.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="flex gap-4 text-sm">
               {TP_ROLES.map((role) => (
@@ -153,6 +185,7 @@ export default function StaffPage() {
               <tr>
                 <th className="px-3 py-2">F.I.Sh</th>
                 <th className="px-3 py-2">Email</th>
+                {isSuperAdmin && <th className="px-3 py-2">Filial</th>}
                 <th className="px-3 py-2 text-center">Planner</th>
                 <th className="px-3 py-2 text-center">Doctor</th>
                 <th className="px-3 py-2 text-center">Consultant</th>
@@ -163,20 +196,20 @@ export default function StaffPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-gray-400">
+                  <td colSpan={isSuperAdmin ? 8 : 7} className="px-3 py-8 text-center text-gray-400">
                     Yuklanmoqda...
                   </td>
                 </tr>
               )}
               {!loading && users.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-gray-400">
+                  <td colSpan={isSuperAdmin ? 8 : 7} className="px-3 py-8 text-center text-gray-400">
                     Xodim yo&apos;q
                   </td>
                 </tr>
               )}
               {users.map((u) => (
-                <StaffRow key={u.id} user={u} onSaved={load} />
+                <StaffRow key={u.id} user={u} showClinic={isSuperAdmin} onSaved={load} />
               ))}
             </tbody>
           </table>

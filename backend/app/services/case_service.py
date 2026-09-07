@@ -118,20 +118,28 @@ def upsert_appointment_cache(db: Session, appt: CliniccardsAppointment) -> None:
     db.flush()
 
 
-def resolve_internal_doctor(db: Session, doctor_name: str | None) -> User | None:
+def resolve_internal_doctor(db: Session, doctor_name: str | None, clinic_id: uuid.UUID | None) -> User | None:
     if not doctor_name:
         return None
-    return db.execute(
+    query = (
         select(User)
         .join(UserRole, UserRole.user_id == User.id)
         .where(UserRole.role == Role.DOCTOR, User.full_name.ilike(doctor_name.strip()))
-    ).scalars().first()
+    )
+    if clinic_id is not None:
+        query = query.where(User.clinic_id == clinic_id)
+    return db.execute(query).scalars().first()
 
 
-def ensure_case(db: Session, appt: CliniccardsAppointment) -> tuple[TreatmentPlanCase, bool]:
+def ensure_case(db: Session, appt: CliniccardsAppointment, clinic_id: uuid.UUID | None) -> tuple[TreatmentPlanCase, bool]:
     """Idempotent case creation (spec section 3): a unique constraint on
     cliniccards_appointment_id guarantees one appointment never produces two
-    cases, even under concurrent sync runs."""
+    cases, even under concurrent sync runs.
+
+    `clinic_id` is resolved by the caller (see
+    app.services.sync_service.resolve_clinic_for_appointment) — every
+    clinic shares one Cliniccards account, so this function itself has no
+    way to know which branch an appointment belongs to."""
     existing = db.execute(
         select(TreatmentPlanCase).where(TreatmentPlanCase.cliniccards_appointment_id == appt.appointment_id)
     ).scalar_one_or_none()
@@ -140,9 +148,10 @@ def ensure_case(db: Session, appt: CliniccardsAppointment) -> tuple[TreatmentPla
 
     deadline_hours = float(get_setting(db, "default_deadline_hours_before_consultation", 24))
     deadline = appt.scheduled_at - timedelta(hours=deadline_hours)
-    primary_doctor = resolve_internal_doctor(db, appt.doctor_name)
+    primary_doctor = resolve_internal_doctor(db, appt.doctor_name, clinic_id)
 
     case = TreatmentPlanCase(
+        clinic_id=clinic_id,
         cliniccards_patient_id=appt.patient_id,
         cliniccards_appointment_id=appt.appointment_id,
         consultation_datetime=appt.scheduled_at,

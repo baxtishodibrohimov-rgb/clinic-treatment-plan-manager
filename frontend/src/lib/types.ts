@@ -1,5 +1,13 @@
 export type Role = "super_admin" | "admin" | "planner" | "doctor" | "consultant";
 
+export interface ClinicOut {
+  id: string;
+  name: string;
+  is_active: boolean;
+  is_default: boolean;
+  cliniccards_branch_code: string | null;
+}
+
 export type CaseStatus =
   | "NEW"
   | "WAITING_ASSIGNMENT"
@@ -20,6 +28,7 @@ export interface UserOut {
   is_active: boolean;
   max_workload: number | null;
   roles: Role[];
+  clinic: ClinicOut | null;
 }
 
 export interface CaseListItem {
@@ -32,6 +41,8 @@ export interface CaseListItem {
   patient_name: string;
   doctor_name: string | null;
   planner_name: string | null;
+  clinic_id: string | null;
+  clinic_name: string | null;
 }
 
 export interface DashboardStats {
