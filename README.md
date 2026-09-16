@@ -142,23 +142,43 @@ and manually-entered cases behave identically. Verified end-to-end
 modal) that a manually-created case shows up correctly scoped to the
 creator's clinic.
 
-**Phase 5 — Clinical Analysis Wizard (og'iz ichi + profil).** The
-questionnaire (33 questions across intraoral-frontal, intraoral-buccal
-left/right, and 5 extraoral/profile photo types) was dictated by the
-clinic owner and seeded verbatim via migration `970995590f0f` as
-`AnalysisTemplate` rows — nothing clinical was invented. `/cases/{id}/analysis`
-renders it grouped by photo type, saves answers via
-`PUT /api/cases/{id}/analysis-answers/{template_id}`, and includes an
-interactive FDI-numbered dental chart (`ToothStatus`, redesigned in
-migration `3938cb64131c` to be position-keyed instead of code-keyed):
-single click marks a tooth missing, double click toggles primary↔permanent
-(or empty↔permanent for positions 6-8, which have no primary variant), and
-a "Sut tish / Doimiy tish" button bulk-resets the whole chart — this is
-exactly what mixed dentition in children requires. Verified end-to-end
-against a real Postgres + a headless-browser run: answers and tooth state
-both survive a full page reload. X-ray (OPG/lateral ceph) questions and
-Findings/Master-Problem-List generation from these answers are not built
-yet — the manual for those hasn't been provided.
+**"Bulut" (pool) image upload.** "Hammasini yuklash" no longer guesses
+which slot an uploaded file belongs to (there's still no classifier) — files
+land in the case's pool (`ClinicalImage.image_type_id = NULL`) via
+`upload_to_pool`. Each required-image slot has two controls: **+** uploads
+straight into that slot (unchanged old behavior), **☁️** opens a picker to
+assign one of the pooled images instead. Assigning a pool image into an
+already-filled slot moves the previous occupant back into the pool rather
+than discarding it (`assign_pool_image_to_slot` /
+`POST /api/cases/{id}/images/{image_type_id}/assign-from-pool`). Verified
+end-to-end with real HTTP calls: bulk upload → pool, assign into a slot,
+assign a second image into the same slot → first one reappears in the pool,
+and re-picking an image already assigned elsewhere correctly 400s.
+
+**Phase 5 — Clinical Analysis Wizard, one photo at a time.** The wizard now
+walks the clinic's own confirmed 13-step capture order (given directly, not
+inferred): intraoral frontal → right buccal → left buccal → overjet →
+upper/lower occlusal → frontal closed-mouth → frontal "M" → frontal smile →
+45° smile → profile 90° rest/"M"/smile. One image + its questions per
+screen, with Keyingisi/Orqaga navigation and numbered pills to jump back and
+re-edit any earlier step (`WIZARD_ORDER` in
+`frontend/src/app/cases/[id]/analysis/page.tsx`). Migration
+`a1b2c3d4e5f6` replaces the 970995590f0f draft entirely with the clinic's
+confirmed 22 questions (verbatim wording, including three free-text
+questions), adds the missing image types (`overjet`, `face_45_smile`,
+`face_profile_90_rest/m/smile`), and retires
+`face_profile_right/left/three_quarter/face_profile_smile` (`is_required =
+false` — superseded by the confirmed sequence, kept only so old data isn't
+orphaned). The interactive FDI dental chart (`ToothStatus`, position-keyed
+per migration `3938cb64131c`) is now split per jaw — the upper-occlusal step
+shows only the upper arch (plus the "Sut tish / Doimiy tish" reset control),
+the lower-occlusal step only the lower arch — instead of one combined chart.
+Verified end-to-end against a real Postgres: all 22 questions resolve to the
+right image type via `GET /api/cases/{id}/analysis-questions`, and the full
+migration chain replays cleanly from scratch.
+X-ray (OPG/lateral ceph) questions and Findings/Master-Problem-List
+generation from these answers are not built yet — the manual for those
+hasn't been provided.
 
 **Phases 6–12** are not built — see ARCHITECTURE.md → Phase plan for
 what's schema-ready vs. still needed.

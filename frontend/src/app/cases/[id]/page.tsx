@@ -6,7 +6,7 @@ import { Shell } from "@/components/shell";
 import { AuthenticatedImage } from "@/components/authenticated-image";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import type { CaseDetail, UserOut } from "@/lib/types";
+import type { CaseDetail, ClinicalImageOut, UserOut } from "@/lib/types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   extraoral: "Extraoral",
@@ -36,6 +36,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [uploadVersion, setUploadVersion] = useState(0);
   const [dragOverBulk, setDragOverBulk] = useState(false);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
+  const [poolPickerFor, setPoolPickerFor] = useState<string | null>(null);
 
   const load = async () => {
     const detail = await api.get<CaseDetail>(`/api/cases/${id}`);
@@ -73,7 +74,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       Array.from(files).forEach((f) => form.append("files", f));
       await api.postForm(`/api/cases/${id}/images/bulk-upload`, form);
       await load();
-      setUploadVersion((v) => v + 1);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Yuklashda xatolik");
     } finally {
@@ -102,6 +102,18 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     }
   };
 
+  const onAssignFromPool = async (imageTypeId: string, poolImageId: string) => {
+    setError(null);
+    try {
+      await api.post(`/api/cases/${id}/images/${imageTypeId}/assign-from-pool`, { pool_image_id: poolImageId });
+      await load();
+      setUploadVersion((v) => v + 1);
+      setPoolPickerFor(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Bulutdan biriktirishda xatolik");
+    }
+  };
+
   const isImageDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.items || []).some((it) => it.kind === "file");
 
   if (error) {
@@ -121,7 +133,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   const imagesByType = new Map(data.images.map((img) => [img.image_type_id, img]));
+  const poolImages = data.pool_images ?? [];
   const categories = ["extraoral", "intraoral", "radiology"];
+  const poolPickerType = poolPickerFor ? data.image_types.find((t) => t.id === poolPickerFor) : null;
 
   return (
     <Shell>
@@ -204,13 +218,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <div>
               <h2 className="font-semibold">Diagnostik rasmlar</h2>
               <p className="text-xs text-gray-500">
-                Bir nechta rasmni birdaniga tanlasangiz (yoki shu yerga sudrab tashlasangiz), tizim ularni
-                ro&apos;yxatdagi tartib bo&apos;yicha joylashtiradi (hali avtomatik aniqlash yo&apos;q) — keyin har
-                bir katakni alohida bosib yoki sudrab tashlab to&apos;g&apos;rilashingiz mumkin.
+                &quot;Hammasini yuklash&quot; rasmlarni pastdagi <strong>bulutga</strong> tashlaydi — hali avtomatik
+                aniqlash yo&apos;q. Har bir katak ostidagi <strong>+</strong> tugmasi kompyuterdan to&apos;g&apos;ridan-to&apos;g&apos;ri
+                yuklaydi, <strong>☁️</strong> tugmasi esa bulutdagi rasmlardan birini shu joyga biriktiradi.
               </p>
             </div>
             <label className="shrink-0 cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
-              {uploading ? "Yuklanmoqda..." : "Hammasini birga yuklash"}
+              {uploading ? "Yuklanmoqda..." : "Hammasini yuklash (bulutga)"}
               <input
                 ref={bulkInputRef}
                 type="file"
@@ -242,13 +256,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     const img = imagesByType.get(t.id);
                     return (
                       <div key={t.id} className="rounded-md border border-gray-200 p-2 space-y-1">
-                        <button
-                          type="button"
-                          title="Bosib yoki sudrab tashlab rasm yuklash / almashtirish"
-                          onClick={() => {
-                            setSingleUploadTypeId(t.id);
-                            singleInputRef.current?.click();
-                          }}
+                        <div
                           onDragOver={(e) => {
                             if (!isImageDrag(e)) return;
                             e.preventDefault();
@@ -265,7 +273,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             setDragOverSlot(null);
                             if (e.dataTransfer.files?.length) onSingleUpload(e.dataTransfer.files, t.id);
                           }}
-                          className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded transition-colors hover:opacity-90 ${
+                          className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded transition-colors ${
                             dragOverSlot === t.id ? "bg-blue-100 ring-2 ring-blue-400" : "bg-gray-100"
                           }`}
                         >
@@ -277,9 +285,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               className="h-full w-full object-cover"
                             />
                           ) : (
-                            <span className="text-xs text-gray-400">+ Yuklash</span>
+                            <span className="text-xs text-gray-400">Bo&apos;sh</span>
                           )}
-                        </button>
+                        </div>
                         <div className="truncate text-xs font-medium">{t.label}</div>
                         {t.is_required && !img && (
                           <span className="inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">
@@ -287,6 +295,27 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           </span>
                         )}
                         {img && <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">Bor</span>}
+                        <div className="flex gap-1 pt-1">
+                          <button
+                            type="button"
+                            title="Kompyuterdan tanlab yuklash"
+                            onClick={() => {
+                              setSingleUploadTypeId(t.id);
+                              singleInputRef.current?.click();
+                            }}
+                            className="flex h-7 w-7 items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-50"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            title="Bulutdan tanlash"
+                            onClick={() => setPoolPickerFor(t.id)}
+                            className="flex h-7 w-7 items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-50"
+                          >
+                            ☁️
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -294,6 +323,23 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             );
           })}
+
+          <div className="space-y-2 border-t border-gray-100 pt-3">
+            <h3 className="text-sm font-semibold">☁️ Bulut ({poolImages.length})</h3>
+            {poolImages.length === 0 ? (
+              <p className="text-xs text-gray-400">Bulutda rasm yo&apos;q — &quot;Hammasini yuklash&quot; orqali qo&apos;shing.</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
+                {poolImages.map((p) => (
+                  <div key={p.id} className="aspect-square overflow-hidden rounded border border-gray-200 bg-gray-100">
+                    {p.external_url && (
+                      <AuthenticatedImage key={`${p.id}-${uploadVersion}`} src={p.external_url} alt="bulut" className="h-full w-full object-cover" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -337,6 +383,37 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
       </div>
+
+      {poolPickerFor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setPoolPickerFor(null)}
+        >
+          <div className="w-full max-w-lg rounded-lg bg-white p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold">Bulutdan tanlang — {poolPickerType?.label}</h3>
+              <button onClick={() => setPoolPickerFor(null)} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
+            </div>
+            {poolImages.length === 0 ? (
+              <p className="text-sm text-gray-500">Bulut bo&apos;sh</p>
+            ) : (
+              <div className="grid grid-cols-4 gap-2">
+                {poolImages.map((p: ClinicalImageOut) => (
+                  <button
+                    key={p.id}
+                    onClick={() => onAssignFromPool(poolPickerFor, p.id)}
+                    className="aspect-square overflow-hidden rounded border border-gray-200 bg-gray-100 hover:border-blue-400"
+                  >
+                    {p.external_url && <AuthenticatedImage src={p.external_url} alt="bulut" className="h-full w-full object-cover" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </Shell>
   );
 }

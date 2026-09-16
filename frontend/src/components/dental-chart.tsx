@@ -59,10 +59,14 @@ export function DentalChart({
   chart,
   onClick,
   onReset,
+  jaw = "both",
+  showReset = true,
 }: {
   chart: DentalChartOut;
   onClick: (quadrant: number, position: number, clickType: "single" | "double") => void;
   onReset: (dentition: "permanent" | "primary") => void;
+  jaw?: "upper" | "lower" | "both";
+  showReset?: boolean;
 }) {
   const byQuadrant = (q: number) => chart.teeth.filter((t) => t.quadrant === q);
   const outward = [8, 7, 6, 5, 4, 3, 2, 1];
@@ -75,26 +79,32 @@ export function DentalChart({
           1 marta bosish = tish yo&apos;q. 2 marta bosish = sut ↔ doimiy tish almashtirish (bo&apos;sh joyda — doimiy tish
           chiqadi).
         </p>
-        <div className="flex gap-2">
-          <button onClick={() => onReset("permanent")} className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium hover:bg-gray-50">
-            Doimiy tish rejimi
-          </button>
-          <button onClick={() => onReset("primary")} className="rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50">
-            Sut tish rejimi
-          </button>
-        </div>
+        {showReset && (
+          <div className="flex gap-2">
+            <button onClick={() => onReset("permanent")} className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium hover:bg-gray-50">
+              Doimiy tish rejimi
+            </button>
+            <button onClick={() => onReset("primary")} className="rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50">
+              Sut tish rejimi
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="inline-flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3">
-        <div className="flex justify-center gap-4">
-          <Quadrant teeth={byQuadrant(1)} order={outward} onClick={(pos, ct) => onClick(1, pos, ct)} />
-          <Quadrant teeth={byQuadrant(2)} order={inward} onClick={(pos, ct) => onClick(2, pos, ct)} />
-        </div>
-        <div className="h-px bg-gray-200" />
-        <div className="flex justify-center gap-4">
-          <Quadrant teeth={byQuadrant(4)} order={outward} onClick={(pos, ct) => onClick(4, pos, ct)} />
-          <Quadrant teeth={byQuadrant(3)} order={inward} onClick={(pos, ct) => onClick(3, pos, ct)} />
-        </div>
+        {jaw !== "lower" && (
+          <div className="flex justify-center gap-4">
+            <Quadrant teeth={byQuadrant(1)} order={outward} onClick={(pos, ct) => onClick(1, pos, ct)} />
+            <Quadrant teeth={byQuadrant(2)} order={inward} onClick={(pos, ct) => onClick(2, pos, ct)} />
+          </div>
+        )}
+        {jaw === "both" && <div className="h-px bg-gray-200" />}
+        {jaw !== "upper" && (
+          <div className="flex justify-center gap-4">
+            <Quadrant teeth={byQuadrant(4)} order={outward} onClick={(pos, ct) => onClick(4, pos, ct)} />
+            <Quadrant teeth={byQuadrant(3)} order={inward} onClick={(pos, ct) => onClick(3, pos, ct)} />
+          </div>
+        )}
       </div>
     </div>
   );

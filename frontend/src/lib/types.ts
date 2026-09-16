@@ -101,6 +101,7 @@ export interface CaseDetail {
   planner_name: string | null;
   image_types: ImageTypeOut[];
   images: ClinicalImageOut[];
+  pool_images: ClinicalImageOut[];
   findings: FindingOut[];
   audit_log: AuditLogOut[];
 }

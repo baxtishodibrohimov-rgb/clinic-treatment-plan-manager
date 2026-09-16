@@ -77,8 +77,13 @@ class CaseDetail(BaseModel):
     planner_name: str | None
     image_types: list[ImageTypeOut]
     images: list[ClinicalImageOut]
+    pool_images: list[ClinicalImageOut]
     findings: list[FindingOut]
     audit_log: list[AuditLogOut]
+
+
+class AssignFromPoolRequest(BaseModel):
+    pool_image_id: uuid.UUID
 
 
 class AssignCaseRequest(BaseModel):

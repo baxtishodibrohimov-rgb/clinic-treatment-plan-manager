@@ -16,6 +16,7 @@ from app.models.audit import AuditLog
 from app.models.user import User, UserRole
 from app.schemas.case import (
     AssignCaseRequest,
+    AssignFromPoolRequest,
     AuditLogOut,
     CaseDetail,
     CaseListItem,
@@ -29,7 +30,14 @@ from app.schemas.case import (
     ReviewRequest,
 )
 from app.security.deps import clinic_scope, get_current_user, require_admin, require_role
-from app.services.case_service import assign_case, bulk_upload_images, create_manual_case, save_uploaded_image, submit_review
+from app.services.case_service import (
+    assign_case,
+    assign_pool_image_to_slot,
+    create_manual_case,
+    save_uploaded_image,
+    submit_review,
+    upload_to_pool,
+)
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB per photo — clinical photos, not raw video
 
@@ -193,7 +201,9 @@ def get_case(case_id: uuid.UUID, db: Session = Depends(get_db), user: User = Dep
         planner_name = planner.full_name if planner else None
 
     image_types = db.execute(select(ImageType).where(ImageType.is_active.is_(True)).order_by(ImageType.sort_order)).scalars().all()
-    images = db.execute(select(ClinicalImage).where(ClinicalImage.case_id == case.id)).scalars().all()
+    all_images = db.execute(select(ClinicalImage).where(ClinicalImage.case_id == case.id)).scalars().all()
+    images = [i for i in all_images if i.image_type_id is not None]
+    pool_images = [i for i in all_images if i.image_type_id is None]
     findings = db.execute(select(Finding).where(Finding.case_id == case.id).order_by(Finding.sort_order)).scalars().all()
     audit = db.execute(select(AuditLog).where(AuditLog.case_id == case.id).order_by(AuditLog.created_at)).scalars().all()
 
@@ -215,6 +225,7 @@ def get_case(case_id: uuid.UUID, db: Session = Depends(get_db), user: User = Dep
         planner_name=planner_name,
         image_types=[ImageTypeOut(id=t.id, code=t.code, label=t.label, category=t.category.value, is_required=t.is_required) for t in image_types],
         images=[_image_out(i) for i in images],
+        pool_images=[_image_out(i) for i in pool_images],
         findings=[FindingOut.model_validate(f) for f in findings],
         audit_log=[AuditLogOut.model_validate(a) for a in audit],
     )
@@ -231,14 +242,34 @@ async def _read_upload(file: UploadFile) -> tuple[str, str, bytes]:
 async def bulk_upload_case_images(
     case_id: uuid.UUID, files: list[UploadFile] = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> CaseDetail:
-    """"Hammasini birga yukla" — files are assigned to this clinic's active
-    image-type slots in their configured display order. There is no image
-    classifier yet, so this is an explicit, transparent ordering rule, not
-    automatic detection; any slot can still be corrected individually via
-    the single-file endpoint below."""
+    """"Hammasini yuklash" — there is no image classifier, so files land in
+    the case's "bulut" (image_type_id=NULL) instead of being guessed into a
+    slot. Staff assign each one to the right slot via assign-from-pool."""
     case = _get_case_or_404(db, case_id, user)
     read_files = [await _read_upload(f) for f in files]
-    bulk_upload_images(db, case, read_files)
+    upload_to_pool(db, case, read_files)
+    db.commit()
+    return get_case(case_id, db, user)
+
+
+@router.post("/{case_id}/images/{image_type_id}/assign-from-pool", response_model=CaseDetail)
+def assign_from_pool_endpoint(
+    case_id: uuid.UUID,
+    image_type_id: uuid.UUID,
+    payload: AssignFromPoolRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CaseDetail:
+    """Moves one "bulut" image into a required-image slot; if that slot was
+    already filled, the previous occupant returns to the bulut instead of
+    being discarded (see assign_pool_image_to_slot)."""
+    case = _get_case_or_404(db, case_id, user)
+    if not db.get(ImageType, image_type_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Rasm turi topilmadi")
+    try:
+        assign_pool_image_to_slot(db, case, image_type_id, payload.pool_image_id)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
     db.commit()
     return get_case(case_id, db, user)
 

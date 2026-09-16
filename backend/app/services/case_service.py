@@ -329,20 +329,55 @@ def save_uploaded_image(
     return image
 
 
-def bulk_upload_images(
-    db: Session, case: TreatmentPlanCase, files: list[tuple[str, str, bytes]]
-) -> list[ClinicalImage]:
-    """"Hammasini birga yukla": assigns each uploaded file, in the order
-    given, to this clinic's active image-type slots in their configured
-    display order (spec: no real classifier exists yet, so this is an
-    explicit, transparent ordering rule — not AI guesswork — and every
-    slot stays individually correctable via save_uploaded_image after).
-    `files` is a list of (filename, mime_type, data)."""
-    image_types = db.execute(select(ImageType).where(ImageType.is_active.is_(True)).order_by(ImageType.sort_order)).scalars().all()
+def upload_to_pool(db: Session, case: TreatmentPlanCase, files: list[tuple[str, str, bytes]]) -> list[ClinicalImage]:
+    """"Hammasini yuklash": no classifier exists yet, so uploaded files
+    don't get auto-assigned to a slot — they land in the case's "bulut"
+    (image_type_id=NULL) for staff to drag/pick into the right slot
+    themselves via assign_pool_image_to_slot. Doesn't touch progress:
+    only images actually assigned to a required slot count toward it."""
+    now = datetime.now(timezone.utc)
     images = []
-    for image_type, (filename, mime_type, data) in zip(image_types, files):
-        images.append(save_uploaded_image(db, case, image_type.id, filename=filename, mime_type=mime_type, data=data))
+    for filename, mime_type, data in files:
+        image = ClinicalImage(
+            case_id=case.id,
+            image_type_id=None,
+            source=ImageSource.UPLOAD,
+            file_data=data,
+            mime_type=mime_type,
+            original_filename=filename,
+            captured_at=now,
+        )
+        db.add(image)
+        images.append(image)
+    db.flush()
     return images
+
+
+def assign_pool_image_to_slot(
+    db: Session, case: TreatmentPlanCase, image_type_id: uuid.UUID, pool_image_id: uuid.UUID
+) -> ClinicalImage:
+    """Moves one "bulut" image into a required-image slot. If that slot
+    already had a (different) image, the old occupant goes back to the
+    bulut instead of being deleted — spec: "xato kiritgan rasmim bulutga
+    qayta qo'shilsin"."""
+    pool_image = db.execute(
+        select(ClinicalImage).where(ClinicalImage.id == pool_image_id, ClinicalImage.case_id == case.id)
+    ).scalar_one_or_none()
+    if not pool_image:
+        raise ValueError("Bulutda bunday rasm topilmadi")
+    if pool_image.image_type_id is not None:
+        raise ValueError("Bu rasm allaqachon boshqa joyga biriktirilgan")
+
+    existing = db.execute(
+        select(ClinicalImage).where(ClinicalImage.case_id == case.id, ClinicalImage.image_type_id == image_type_id)
+    ).scalar_one_or_none()
+    if existing and existing.id != pool_image.id:
+        existing.image_type_id = None  # back to the bulut, not deleted
+
+    pool_image.image_type_id = image_type_id
+    db.flush()
+    recompute_images_progress(db, case)
+    return pool_image
 
 
 def assign_case(db: Session, case: TreatmentPlanCase, planner_user_id: uuid.UUID, *, actor_user_id: uuid.UUID, note: str | None = None) -> None:

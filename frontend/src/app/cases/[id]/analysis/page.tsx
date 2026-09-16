@@ -4,31 +4,45 @@ import { useEffect, useState, use as useUnwrap } from "react";
 import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { DentalChart } from "@/components/dental-chart";
+import { AuthenticatedImage } from "@/components/authenticated-image";
 import { api, ApiError } from "@/lib/api";
-import type { AnalysisQuestionOut, DentalChartOut } from "@/lib/types";
+import type { AnalysisQuestionOut, CaseDetail, DentalChartOut } from "@/lib/types";
 
-const CATEGORY_LABELS: Record<string, string> = {
-  intraoral: "Og'iz ichi",
-  extraoral: "Yuz / Profil",
-  radiology: "Rentgen",
+// The clinic's confirmed photo-capture order for the wizard — one image per
+// step, in exactly this sequence. Anything not in this list (X-rays,
+// leftover face_profile_right/left/3-4 view/face_profile_smile) isn't part
+// of this flow.
+const WIZARD_ORDER = [
+  "intraoral_frontal",
+  "intraoral_right_buccal",
+  "intraoral_left_buccal",
+  "overjet",
+  "intraoral_upper_occlusal",
+  "intraoral_lower_occlusal",
+  "face_frontal",
+  "face_frontal_m",
+  "face_frontal_smile",
+  "face_45_smile",
+  "face_profile_90_rest",
+  "face_profile_90_m",
+  "face_profile_90_smile",
+];
+
+// The dental chart is one shared object per case, not a per-photo
+// question — the upper/lower occlusal steps each show their own jaw's
+// half of it (see dental-chart.tsx for click mechanics).
+const DENTAL_CHART_JAW_BY_CODE: Record<string, "upper" | "lower"> = {
+  intraoral_upper_occlusal: "upper",
+  intraoral_lower_occlusal: "lower",
 };
-
-function groupQuestions(questions: AnalysisQuestionOut[]) {
-  const byCategory = new Map<string, Map<string, AnalysisQuestionOut[]>>();
-  for (const q of questions) {
-    const cat = q.template.category ?? "boshqa";
-    const sub = q.template.image_type_code ?? "umumiy";
-    if (!byCategory.has(cat)) byCategory.set(cat, new Map());
-    const subMap = byCategory.get(cat)!;
-    if (!subMap.has(sub)) subMap.set(sub, []);
-    subMap.get(sub)!.push(q);
-  }
-  return byCategory;
-}
 
 function QuestionField({ q, onSave }: { q: AnalysisQuestionOut; onSave: (templateId: string, value: string | boolean) => void }) {
   const currentValue = q.answer?.answer_value?.value ?? null;
   const [text, setText] = useState(typeof currentValue === "string" && q.template.answer_type === "text" ? currentValue : "");
+  useEffect(() => {
+    setText(typeof currentValue === "string" && q.template.answer_type === "text" ? currentValue : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.template.id, currentValue]);
 
   if (q.template.answer_type === "single_choice") {
     return (
@@ -82,7 +96,7 @@ function QuestionField({ q, onSave }: { q: AnalysisQuestionOut; onSave: (templat
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onBlur={() => onSave(q.template.id, text)}
+        onBlur={() => { if (text !== currentValue) onSave(q.template.id, text); }}
         rows={2}
         className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
       />
@@ -93,17 +107,21 @@ function QuestionField({ q, onSave }: { q: AnalysisQuestionOut; onSave: (templat
 export default function CaseAnalysisPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = useUnwrap(params);
   const [questions, setQuestions] = useState<AnalysisQuestionOut[]>([]);
+  const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   const [chart, setChart] = useState<DentalChartOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stepIndex, setStepIndex] = useState(0);
 
   const load = async () => {
-    const [q, c] = await Promise.all([
+    const [q, c, cd] = await Promise.all([
       api.get<AnalysisQuestionOut[]>(`/api/cases/${id}/analysis-questions`),
       api.get<DentalChartOut>(`/api/cases/${id}/dental-chart`),
+      api.get<CaseDetail>(`/api/cases/${id}`),
     ]);
     setQuestions(q);
     setChart(c);
+    setCaseDetail(cd);
   };
 
   useEffect(() => {
@@ -147,7 +165,7 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
     }
   };
 
-  if (loading) {
+  if (loading || !caseDetail) {
     return (
       <Shell>
         <p className="text-gray-500">Yuklanmoqda...</p>
@@ -155,8 +173,23 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  const grouped = groupQuestions(questions);
-  const categoryOrder = ["intraoral", "extraoral", "radiology"];
+  const imageTypeByCode = new Map(caseDetail.image_types.map((t) => [t.code, t]));
+  const imageByTypeId = new Map(caseDetail.images.map((img) => [img.image_type_id, img]));
+  const questionsByTypeCode = new Map<string, AnalysisQuestionOut[]>();
+  for (const q of questions) {
+    const code = q.template.image_type_code;
+    if (!code) continue;
+    if (!questionsByTypeCode.has(code)) questionsByTypeCode.set(code, []);
+    questionsByTypeCode.get(code)!.push(q);
+  }
+
+  const currentCode = WIZARD_ORDER[stepIndex];
+  const currentType = imageTypeByCode.get(currentCode);
+  const currentImage = currentType ? imageByTypeId.get(currentType.id) : null;
+  const currentQuestions = (questionsByTypeCode.get(currentCode) ?? []).sort((a, b) => a.template.sort_order - b.template.sort_order);
+  const isFirst = stepIndex === 0;
+  const isLast = stepIndex === WIZARD_ORDER.length - 1;
+  const dentalChartJaw = DENTAL_CHART_JAW_BY_CODE[currentCode];
 
   return (
     <Shell>
@@ -165,32 +198,105 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
           <Link href={`/cases/${id}`} className="text-gray-500 hover:text-gray-700">
             ← Case&apos;ga qaytish
           </Link>
-          <h1 className="text-2xl font-bold">Klinik tahlil</h1>
+          <div>
+            <h1 className="text-2xl font-bold">Clinical Analysis Wizard</h1>
+            <p className="text-sm text-gray-500">Bosqich {stepIndex + 1} / {WIZARD_ORDER.length}</p>
+          </div>
         </div>
 
         {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-          <h2 className="font-semibold">Tish jadvali (okklyuzion)</h2>
-          {chart && <DentalChart chart={chart} onClick={clickTooth} onReset={resetChart} />}
+        <div className="flex flex-wrap gap-1.5">
+          {WIZARD_ORDER.map((code, idx) => {
+            const t = imageTypeByCode.get(code);
+            const hasImage = t && imageByTypeId.has(t.id);
+            return (
+              <button
+                key={code}
+                onClick={() => setStepIndex(idx)}
+                title={t?.label ?? code}
+                className={`flex h-7 min-w-7 items-center justify-center rounded border px-1.5 text-xs font-medium ${
+                  idx === stepIndex
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : hasImage
+                      ? "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                      : "border-dashed border-gray-300 text-gray-400 hover:bg-gray-50"
+                }`}
+              >
+                {idx + 1}
+              </button>
+            );
+          })}
         </div>
 
-        {categoryOrder
-          .filter((cat) => grouped.has(cat))
-          .map((cat) => (
-            <div key={cat} className="rounded-lg border border-gray-200 bg-white p-4 space-y-5">
-              <h2 className="font-semibold">{CATEGORY_LABELS[cat] ?? cat}</h2>
-              {Array.from(grouped.get(cat)!.entries()).map(([sub, qs]) => (
-                <div key={sub} className="space-y-3 border-t border-gray-100 pt-3 first:border-0 first:pt-0">
-                  {qs
-                    .sort((a, b) => a.template.sort_order - b.template.sort_order)
-                    .map((q) => (
-                      <QuestionField key={q.template.id} q={q} onSave={saveAnswer} />
-                    ))}
-                </div>
-              ))}
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="font-semibold">{currentType?.label ?? currentCode}</h2>
+            {currentType && (
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">{currentType.category}</span>
+            )}
+          </div>
+
+          {!currentType ? (
+            <p className="text-sm text-gray-500">
+              Bu rasm turi (&quot;{currentCode}&quot;) hali sozlanmagan — migratsiya to&apos;liq qo&apos;llanilmagan bo&apos;lishi mumkin.
+            </p>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-[280px_1fr]">
+              <div className="flex aspect-square items-center justify-center overflow-hidden rounded bg-gray-100">
+                {currentImage && currentImage.external_url ? (
+                  <AuthenticatedImage src={currentImage.external_url} alt={currentType.label} className="h-full w-full object-contain" />
+                ) : (
+                  <span className="text-xs text-gray-400">Rasm hali yuklanmagan</span>
+                )}
+              </div>
+              <div className="space-y-4">
+                {!currentImage && (
+                  <p className="text-sm text-gray-500">
+                    Bu rasm hali case sahifasida yuklanmagan. Savollarga baribir javob berishingiz mumkin, lekin avval rasmni yuklashni tavsiya qilamiz.
+                  </p>
+                )}
+                {currentQuestions.length === 0 ? (
+                  <p className="text-sm text-gray-500">Bu rasm uchun savol kiritilmagan.</p>
+                ) : (
+                  currentQuestions.map((q) => <QuestionField key={q.template.id} q={q} onSave={saveAnswer} />)
+                )}
+              </div>
             </div>
-          ))}
+          )}
+        </div>
+
+        {dentalChartJaw && chart && (
+          <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+            <h2 className="font-semibold">Tish jadvali (FDI) — {dentalChartJaw === "upper" ? "yuqori jag'" : "pastki jag'"}</h2>
+            <DentalChart chart={chart} onClick={clickTooth} onReset={resetChart} jaw={dentalChartJaw} showReset={dentalChartJaw === "upper"} />
+          </div>
+        )}
+
+        <div className="flex justify-between">
+          <button
+            disabled={isFirst}
+            onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
+            className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium disabled:opacity-40 hover:bg-gray-50"
+          >
+            ← Orqaga
+          </button>
+          {isLast ? (
+            <Link
+              href={`/cases/${id}`}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Yakunlash
+            </Link>
+          ) : (
+            <button
+              onClick={() => setStepIndex((i) => Math.min(WIZARD_ORDER.length - 1, i + 1))}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Keyingisi →
+            </button>
+          )}
+        </div>
       </div>
     </Shell>
   );

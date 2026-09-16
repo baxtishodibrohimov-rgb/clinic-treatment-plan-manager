@@ -202,7 +202,7 @@ current user` (while doctors keep clinic-wide visibility) is called out as
 | 2 | Cliniccards mock integration + appointment sync | **Done.** Mock adapter, poll + webhook, idempotent case creation — verified live. |
 | 3 | TreatmentPlanCase + assignment + dashboard | **Done.** Manual (`POST /assign`) and auto (configurable `least_workload`/`round_robin`) assignment; Kanban dashboard at `/dashboard`. |
 | 4 | Telegram notification + reminders | **Done** at the mechanism level (outbox, dispatcher, configurable reminder rules, overdue escalation) — verified via the outbox/failure path; needs a real `TELEGRAM_BOT_TOKEN` to actually deliver messages. |
-| 5 | Image gallery + Clinical Analysis Wizard | **Schema + gallery done.** The case page shows images grouped by extraoral/intraoral/radiology with required-missing badges. The guided wizard UI is not built. |
+| 5 | Image gallery + Clinical Analysis Wizard | **Built.** Bulut (pool) image upload with per-slot +/☁️ controls (`assign_pool_image_to_slot`), and a one-photo-at-a-time wizard following the clinic's confirmed 13-step capture order, with the FDI dental chart split per jaw under the two occlusal steps. All 22 questions are the clinic's own confirmed wording (migration `a1b2c3d4e5f6`). |
 | 6 | Image annotation (Konva/Fabric) | **Not started.** No `ImageAnnotation`-backed canvas UI yet (table exists). |
 | 7 | Master Problem List | **Schema + read-only view.** `Finding` renders on the case page; nothing yet auto-populates it (depends on Phase 5/6). |
 | 8 | Treatment Plan Builder | **Schema only.** No builder UI. |
