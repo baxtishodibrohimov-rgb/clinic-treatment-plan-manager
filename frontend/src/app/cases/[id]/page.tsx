@@ -34,6 +34,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   // (same image id), so AuthenticatedImage wouldn't know to re-fetch —
   // bump this after every successful upload to force a remount/refetch.
   const [uploadVersion, setUploadVersion] = useState(0);
+  const [dragOverBulk, setDragOverBulk] = useState(false);
+  const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
 
   const load = async () => {
     const detail = await api.get<CaseDetail>(`/api/cases/${id}`);
@@ -80,14 +82,15 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     }
   };
 
-  const onSingleUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0 || !singleUploadTypeId) return;
+  const onSingleUpload = async (files: FileList | null, typeId?: string | null) => {
+    const targetTypeId = typeId ?? singleUploadTypeId;
+    if (!files || files.length === 0 || !targetTypeId) return;
     setUploading(true);
     setError(null);
     try {
       const form = new FormData();
       form.append("file", files[0]);
-      await api.postForm(`/api/cases/${id}/images/${singleUploadTypeId}`, form);
+      await api.postForm(`/api/cases/${id}/images/${targetTypeId}`, form);
       await load();
       setUploadVersion((v) => v + 1);
     } catch (e) {
@@ -98,6 +101,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       if (singleInputRef.current) singleInputRef.current.value = "";
     }
   };
+
+  const isImageDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.items || []).some((it) => it.kind === "file");
 
   if (error) {
     return (
@@ -179,13 +184,29 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
+        <div
+          onDragOver={(e) => {
+            if (!isImageDrag(e)) return;
+            e.preventDefault();
+            setDragOverBulk(true);
+          }}
+          onDragLeave={() => setDragOverBulk(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOverBulk(false);
+            if (e.dataTransfer.files?.length) onBulkUpload(e.dataTransfer.files);
+          }}
+          className={`rounded-lg border p-4 space-y-4 transition-colors ${
+            dragOverBulk ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white"
+          }`}
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="font-semibold">Diagnostik rasmlar</h2>
               <p className="text-xs text-gray-500">
-                Bir nechta rasmni birdaniga tanlasangiz, tizim ularni ro&apos;yxatdagi tartib bo&apos;yicha
-                joylashtiradi (hali avtomatik aniqlash yo&apos;q) — keyin har bir katakni alohida bosib to&apos;g&apos;rilashingiz mumkin.
+                Bir nechta rasmni birdaniga tanlasangiz (yoki shu yerga sudrab tashlasangiz), tizim ularni
+                ro&apos;yxatdagi tartib bo&apos;yicha joylashtiradi (hali avtomatik aniqlash yo&apos;q) — keyin har
+                bir katakni alohida bosib yoki sudrab tashlab to&apos;g&apos;rilashingiz mumkin.
               </p>
             </div>
             <label className="shrink-0 cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
@@ -223,12 +244,30 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                       <div key={t.id} className="rounded-md border border-gray-200 p-2 space-y-1">
                         <button
                           type="button"
-                          title="Bosib rasm yuklash / almashtirish"
+                          title="Bosib yoki sudrab tashlab rasm yuklash / almashtirish"
                           onClick={() => {
                             setSingleUploadTypeId(t.id);
                             singleInputRef.current?.click();
                           }}
-                          className="flex aspect-square w-full items-center justify-center overflow-hidden rounded bg-gray-100 hover:opacity-90"
+                          onDragOver={(e) => {
+                            if (!isImageDrag(e)) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setDragOverSlot(t.id);
+                          }}
+                          onDragLeave={(e) => {
+                            e.stopPropagation();
+                            setDragOverSlot((cur) => (cur === t.id ? null : cur));
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setDragOverSlot(null);
+                            if (e.dataTransfer.files?.length) onSingleUpload(e.dataTransfer.files, t.id);
+                          }}
+                          className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded transition-colors hover:opacity-90 ${
+                            dragOverSlot === t.id ? "bg-blue-100 ring-2 ring-blue-400" : "bg-gray-100"
+                          }`}
                         >
                           {img && img.external_url ? (
                             <AuthenticatedImage
