@@ -40,12 +40,15 @@ class Settings(BaseSettings):
     cliniccards_mode: str = "mock"  # "mock" | "http"
     cliniccards_api_url: str | None = None
     cliniccards_api_key: str | None = None
-    cliniccards_api_key_header: str = "Authorization"
+    cliniccards_api_key_header: str = "Token"
     cliniccards_patients_path: str = "/patients"
-    cliniccards_appointments_path: str = "/appointments"
-    cliniccards_appointment_by_id_path: str = "/appointments/{appointment_id}"
-    cliniccards_patient_documents_path: str = "/patients/{patient_id}/documents"
-    cliniccards_patient_images_path: str = "/patients/{patient_id}/images"
+    cliniccards_appointments_path: str = "/visits"
+    cliniccards_appointment_by_id_path: str = "/visits/{appointment_id}"
+    cliniccards_patient_documents_path: str = "/files/{patient_id}"
+    cliniccards_patient_images_path: str = "/files/{patient_id}"
+    cliniccards_file_path: str = "/file"
+    cliniccards_sync_days_back: int = 1
+    cliniccards_sync_days_ahead: int = 60
     cliniccards_webhook_secret: str | None = None
 
     # Telegram

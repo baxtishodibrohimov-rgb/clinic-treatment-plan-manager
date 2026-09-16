@@ -3,6 +3,7 @@
 Shared between the periodic Celery poll, the webhook endpoint, and the
 "Sync now" admin action, so all three paths create/update cases identically.
 """
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -14,7 +15,7 @@ from app.integrations.cliniccards.types import CliniccardsAppointment
 from app.models.clinic import Clinic
 from app.models.enums import SyncStatus, SyncType
 from app.models.sync_log import IntegrationSyncLog
-from app.services.case_service import ensure_case, get_setting, import_images, upsert_appointment_cache, upsert_patient_cache
+from app.services.case_service import ensure_case, import_images, upsert_appointment_cache, upsert_patient_cache
 
 # Every clinic shares one Cliniccards account — there is no per-clinic API
 # credential. These are best-effort field names to check on the raw
@@ -22,6 +23,14 @@ from app.services.case_service import ensure_case, get_setting, import_images, u
 # API docs show what that field is actually called (same caveat as
 # app/integrations/cliniccards/http_provider.py).
 BRANCH_FIELD_CANDIDATES = ("branchCode", "branch_code", "branch", "clinicCode", "clinic_code", "location", "filialCode", "filial")
+
+
+def is_second_consultation(appt: CliniccardsAppointment) -> bool:
+    """Cliniccards has no visit-type field; the clinic marks second consults
+    at the beginning of the visit note. Accept the observed spellings and
+    the clinic's short form (a leading 2 followed by text)."""
+    note = re.sub(r"\s+", " ", (appt.note or "").strip().casefold())
+    return note.startswith(("2and cons", "2nd cons", "2 and cons")) or bool(re.match(r"^2\D", note))
 
 
 def resolve_clinic_for_appointment(db: Session, appt: CliniccardsAppointment) -> uuid.UUID | None:
@@ -63,14 +72,10 @@ async def sync_second_consultations(
     cases_created = 0
 
     try:
-        second_consultation_codes: list[str] = get_setting(
-            db, "second_consultation_appointment_type_codes", ["consultation_2"]
-        )
-
         appts = await adapter.get_appointments()
         if only_appointment_id:
             appts = [a for a in appts if a.appointment_id == only_appointment_id]
-        appts = [a for a in appts if a.appointment_type_code in second_consultation_codes]
+        appts = [a for a in appts if is_second_consultation(a)]
         records_seen = len(appts)
 
         for appt in appts:

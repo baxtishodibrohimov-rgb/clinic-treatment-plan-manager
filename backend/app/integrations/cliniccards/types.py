@@ -12,15 +12,16 @@ rest of the app (case sync, dashboard, image gallery) can be built and
 tested now.
 """
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 
 @dataclass
 class CliniccardsPatient:
     patient_id: str
     full_name: str
-    birth_date: str | None
+    birth_date: date | None
     phone: str | None
+    created_at: datetime | None
     raw: dict
 
 
@@ -32,6 +33,7 @@ class CliniccardsAppointment:
     appointment_type_code: str
     appointment_type_label: str
     scheduled_at: datetime
+    note: str | None = None
     raw: dict = field(default_factory=dict)
 
 

@@ -7,7 +7,7 @@ relative to "now" each call so demo appointments stay in the near future no
 matter when this runs.
 """
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app.integrations.cliniccards.base import CliniccardsAdapter
 from app.integrations.cliniccards.types import (
@@ -61,8 +61,9 @@ def _to_patient(seed: _PatientSeed) -> CliniccardsPatient:
     return CliniccardsPatient(
         patient_id=seed.patient_id,
         full_name=seed.full_name,
-        birth_date=seed.birth_date,
+        birth_date=date.fromisoformat(seed.birth_date),
         phone=seed.phone,
+        created_at=datetime.now(timezone.utc),
         raw={"mock": True},
     )
 
@@ -76,6 +77,7 @@ def _to_appointment(seed: _PatientSeed) -> CliniccardsAppointment:
         appointment_type_code="consultation_2",
         appointment_type_label="2-konsultatsiya",
         scheduled_at=scheduled_at,
+        note="2and cons",
         raw={"mock": True},
     )
 

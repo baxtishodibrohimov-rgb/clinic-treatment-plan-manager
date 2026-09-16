@@ -230,6 +230,7 @@ def create_manual_case(
         appointment_type_code="manual",
         appointment_type_label="Qo'lda kiritilgan",
         scheduled_at=consultation_datetime,
+        note=None,
         raw={"manual": True},
     )
     upsert_appointment_cache(db, appt)
