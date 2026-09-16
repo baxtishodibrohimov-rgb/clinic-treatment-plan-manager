@@ -1,5 +1,6 @@
 """Cliniccards REST client mapped to the official public API."""
 from datetime import date, datetime, timedelta, timezone
+from hashlib import sha256
 from typing import Any
 from urllib.parse import quote
 import httpx
@@ -28,19 +29,50 @@ def _as_list(payload: Any) -> list[dict[str, Any]]:
         return data if isinstance(data, list) else []
     return []
 
+def _limited(value: Any, limit: int) -> str | None:
+    if value is None:
+        return None
+    return str(value)[:limit]
+
+def _stable_id(value: Any) -> str:
+    text = str(value or "")
+    return text if len(text) <= 255 else sha256(text.encode("utf-8")).hexdigest()
+
 def _map_patient(raw: dict[str, Any]) -> CliniccardsPatient:
     name = " ".join(str(raw.get(k) or "").strip() for k in ("lastname", "firstname", "middlename")).strip()
-    return CliniccardsPatient(str(raw.get("patient_id") or raw.get("id") or ""), name or str(raw.get("name") or ""), _date(raw.get("birthday") or raw.get("birth_date")), raw.get("phone"), _dt(raw.get("date_created")), raw)
+    return CliniccardsPatient(
+        str(raw.get("patient_id") or raw.get("id") or ""),
+        _limited(name or raw.get("name") or "", 255) or "",
+        _date(raw.get("birthday") or raw.get("birth_date")),
+        _limited(raw.get("phone"), 64),
+        _dt(raw.get("date_created")),
+        raw,
+    )
 
 def _map_appointment(raw: dict[str, Any]) -> CliniccardsAppointment:
     scheduled = _dt(raw.get("visit_start"))
     if not scheduled: raise ValueError("Cliniccards visit_start is missing or invalid")
     note = raw.get("note")
-    return CliniccardsAppointment(str(raw.get("visit_id") or raw.get("id") or ""), str(raw.get("patient_id") or ""), raw.get("doctor"), "visit", str(note or "Visit"), scheduled, str(note) if note is not None else None, raw)
+    return CliniccardsAppointment(
+        str(raw.get("visit_id") or raw.get("id") or ""),
+        str(raw.get("patient_id") or ""),
+        _limited(raw.get("doctor"), 255),
+        "visit",
+        _limited(note or "Visit", 255) or "Visit",
+        scheduled,
+        str(note) if note is not None else None,
+        raw,
+    )
 
 def _map_file(raw: dict[str, Any], patient_id: str) -> CliniccardsImage:
     name = str(raw.get("file") or raw.get("original") or "")
-    return CliniccardsImage(str(raw.get("file_id") or raw.get("id") or name), patient_id, str(raw.get("stage") or raw.get("comments") or raw.get("original") or "") or None, name, _dt(raw.get("date_uploaded")))
+    return CliniccardsImage(
+        _stable_id(raw.get("file_id") or raw.get("id") or name),
+        patient_id,
+        _limited(raw.get("stage") or raw.get("comments") or raw.get("original"), 255),
+        name[:1024],
+        _dt(raw.get("date_uploaded")),
+    )
 
 class HttpCliniccardsAdapter(CliniccardsAdapter):
     def __init__(self, settings: Settings):
