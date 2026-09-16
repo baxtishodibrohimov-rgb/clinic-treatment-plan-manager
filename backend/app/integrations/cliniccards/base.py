@@ -38,3 +38,8 @@ class CliniccardsAdapter(ABC):
 
     @abstractmethod
     async def get_patient_images(self, patient_id: str) -> list[CliniccardsImage]: ...
+
+    @abstractmethod
+    async def download_file(self, name: str) -> tuple[bytes, str]:
+        """Download one Cliniccards file by its opaque `file` value."""
+        ...

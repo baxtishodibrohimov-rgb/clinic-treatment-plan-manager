@@ -41,11 +41,9 @@ class ClinicalImage(Base, UUIDPKMixin):
     cliniccards_document_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    # Manually-uploaded files (source=UPLOAD) are stored directly in Postgres
-    # as a stop-gap until Cliniccards is connected — Cliniccards-sourced
-    # images never populate these, they just use external_url. Fine for a
-    # handful of clinical photos per case; would need real object storage
-    # (S3/R2) if upload volume grows.
+    # Uploaded files and private Cliniccards image copies are stored directly
+    # in Postgres. For larger long-term volume this should move to object
+    # storage (S3/R2), while keeping the same authenticated API endpoint.
     file_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

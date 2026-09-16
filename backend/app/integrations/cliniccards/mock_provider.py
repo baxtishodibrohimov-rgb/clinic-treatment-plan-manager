@@ -136,3 +136,7 @@ class MockCliniccardsAdapter(CliniccardsAdapter):
             )
             for idx, label in enumerate(IMAGE_LABELS)
         ]
+
+    async def download_file(self, name: str) -> tuple[bytes, str]:
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="100%" height="100%" fill="#e5e7eb"/><text x="50%" y="50%" text-anchor="middle" fill="#6b7280">Mock Cliniccards image</text></svg>'
+        return svg, "image/svg+xml"

@@ -247,26 +247,37 @@ async def import_images(db: Session, adapter: CliniccardsAdapter, case: Treatmen
 
     for img in images:
         image_type_id = by_label.get(img.label_hint.lower()) if img.label_hint else None
-        existing = db.execute(
+        image = db.execute(
             select(ClinicalImage).where(
                 ClinicalImage.case_id == case.id, ClinicalImage.cliniccards_document_id == img.image_id
             )
         ).scalar_one_or_none()
-        if existing:
-            existing.image_type_id = image_type_id
-            existing.external_url = img.url
-            existing.captured_at = img.captured_at
+        if image:
+            image.image_type_id = image_type_id
+            image.external_url = img.url
+            image.captured_at = img.captured_at
         else:
-            db.add(
-                ClinicalImage(
-                    case_id=case.id,
-                    image_type_id=image_type_id,
-                    source=ImageSource.CLINICCARDS,
-                    cliniccards_document_id=img.image_id,
-                    external_url=img.url,
-                    captured_at=img.captured_at,
-                )
+            image = ClinicalImage(
+                case_id=case.id,
+                image_type_id=image_type_id,
+                source=ImageSource.CLINICCARDS,
+                cliniccards_document_id=img.image_id,
+                external_url=img.url,
+                captured_at=img.captured_at,
             )
+            db.add(image)
+            db.flush()
+
+        # Store a private local copy. Existing images are not downloaded
+        # again; newly uploaded Cliniccards files are picked up next sync.
+        if image.file_data is None and img.url:
+            try:
+                file_data, mime_type = await adapter.download_file(img.url)
+            except Exception:  # noqa: BLE001 - leave metadata for the next retry/proxy fallback
+                continue
+            image.file_data = file_data
+            image.mime_type = mime_type
+            image.original_filename = img.url.rsplit("/", 1)[-1][:255] or "cliniccards-image"
     db.flush()
     recompute_images_progress(db, case)
 

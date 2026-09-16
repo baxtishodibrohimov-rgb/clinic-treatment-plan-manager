@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import { API_URL, getToken } from "@/lib/api";
 
 /**
- * Manually-uploaded images are served from our own backend behind auth
- * (a plain <img src> can't attach an Authorization header), so this
- * fetches the bytes with the token and renders them as a blob URL.
- * Cliniccards-sourced images are already public URLs and don't need this.
+ * All clinical images are served from our own backend behind auth.
+ * Cliniccards images are fetched server-side with the secret API Token, so
+ * the browser only ever receives our protected /api/images/... URL.
  */
 export function AuthenticatedImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);

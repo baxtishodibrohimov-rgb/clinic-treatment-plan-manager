@@ -208,7 +208,9 @@ def create_manual_case_endpoint(
 
 
 def _image_out(image: ClinicalImage) -> ClinicalImageOut:
-    url = image.external_url if image.source != ImageSource.UPLOAD else f"/api/images/{image.id}/file"
+    # Both uploaded and Cliniccards images are served through our authenticated
+    # backend. The Cliniccards Token is never exposed to the browser.
+    url = f"/api/images/{image.id}/file" if image.file_data or image.external_url else None
     return ClinicalImageOut(id=image.id, image_type_id=image.image_type_id, external_url=url, source=image.source.value)
 
 
