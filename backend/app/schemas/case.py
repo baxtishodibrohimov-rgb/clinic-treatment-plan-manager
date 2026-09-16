@@ -121,3 +121,8 @@ class DashboardStats(BaseModel):
     review_pending: int
     ready: int
     overdue: int
+
+
+class DailyConsultationCount(BaseModel):
+    date: date
+    count: int

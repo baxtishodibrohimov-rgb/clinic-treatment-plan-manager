@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,7 @@ from app.schemas.case import (
     CaseListItem,
     ClinicalImageOut,
     DashboardStats,
+    DailyConsultationCount,
     DoctorOut,
     FindingOut,
     ImageTypeOut,
@@ -111,6 +112,39 @@ def dashboard_stats(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | 
         ready=sum(1 for c in cases if c.status == CaseStatus.READY),
         overdue=sum(1 for c in cases if c.status == CaseStatus.OVERDUE),
     )
+
+
+@router.get(
+    "/second-consultations/daily",
+    response_model=list[DailyConsultationCount],
+    dependencies=[Depends(get_current_user)],
+)
+def second_consultations_daily(
+    from_date: date = Query(alias="from"),
+    to_date: date = Query(alias="to"),
+    db: Session = Depends(get_db),
+    scope_clinic_id: uuid.UUID | None = Depends(clinic_scope),
+) -> list[DailyConsultationCount]:
+    if to_date < from_date:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "to sanasi from sanasidan oldin bo'lishi mumkin emas")
+    if (to_date - from_date).days > 366:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sana oralig'i 366 kundan oshmasin")
+
+    query = select(TreatmentPlanCase.consultation_datetime).where(
+        TreatmentPlanCase.consultation_datetime.isnot(None)
+    )
+    if scope_clinic_id is not None:
+        query = query.where(TreatmentPlanCase.clinic_id == scope_clinic_id)
+
+    counts: dict[date, int] = {}
+    for consultation_at in db.execute(query).scalars():
+        consultation_date = consultation_at.date()
+        if from_date <= consultation_date <= to_date:
+            counts[consultation_date] = counts.get(consultation_date, 0) + 1
+
+    return [DailyConsultationCount(date=day, count=counts.get(day, 0)) for day in (
+        from_date + timedelta(days=offset) for offset in range((to_date - from_date).days + 1)
+    )]
 
 
 @router.get("/doctors", response_model=list[DoctorOut], dependencies=[Depends(get_current_user)])

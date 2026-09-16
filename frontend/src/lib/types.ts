@@ -59,6 +59,11 @@ export interface DashboardStats {
   overdue: number;
 }
 
+export interface DailyConsultationCount {
+  date: string;
+  count: number;
+}
+
 export interface ImageTypeOut {
   id: string;
   code: string;

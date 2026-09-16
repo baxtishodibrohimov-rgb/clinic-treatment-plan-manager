@@ -6,11 +6,22 @@ import { Shell } from "@/components/shell";
 import { api, ApiError } from "@/lib/api";
 import { onScopeClinicChange, withClinicScope } from "@/lib/clinic-scope";
 import { useAuth } from "@/lib/auth-context";
-import type { CaseListItem, CaseStatus, ClinicOut, DashboardStats, DoctorOut } from "@/lib/types";
+import type { CaseListItem, CaseStatus, ClinicOut, DailyConsultationCount, DashboardStats, DoctorOut } from "@/lib/types";
+
+function toLocalDateValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 function toLocalDatetimeInputValue(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${toLocalDateValue(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function addDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
 }
 
 function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -210,16 +221,22 @@ export default function DashboardPage() {
   const { isSuperAdmin } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [cases, setCases] = useState<CaseListItem[]>([]);
+  const [dailyCounts, setDailyCounts] = useState<DailyConsultationCount[]>([]);
+  const [selectedDate, setSelectedDate] = useState(() => toLocalDateValue(new Date()));
   const [loading, setLoading] = useState(true);
   const [showNewPatient, setShowNewPatient] = useState(false);
 
   const load = async () => {
-    const [s, c] = await Promise.all([
+    const rangeStart = toLocalDateValue(new Date());
+    const rangeEnd = toLocalDateValue(addDays(new Date(), 60));
+    const [s, c, daily] = await Promise.all([
       api.get<DashboardStats>(withClinicScope("/api/cases/dashboard-stats")),
       api.get<CaseListItem[]>(withClinicScope("/api/cases")),
+      api.get<DailyConsultationCount[]>(withClinicScope(`/api/cases/second-consultations/daily?from=${rangeStart}&to=${rangeEnd}`)),
     ]);
     setStats(s);
     setCases(c);
+    setDailyCounts(daily);
   };
 
   useEffect(() => {
@@ -233,6 +250,9 @@ export default function DashboardPage() {
       unsubscribe();
     };
   }, []);
+
+  const selectedDayCount = dailyCounts.find((item) => item.date === selectedDate)?.count ?? 0;
+  const busyDays = dailyCounts.filter((item) => item.count > 0);
 
   const statCards = stats
     ? [
@@ -271,6 +291,49 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+
+        <section className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold">2-konsultatsiyalar kalendari</h2>
+              <p className="text-xs text-gray-500">Sanani tanlang — shu kundagi konsultatsiyalar soni ko‘rinadi</p>
+            </div>
+            <div className="flex items-end gap-3">
+              <label className="space-y-1">
+                <span className="block text-xs font-medium text-gray-600">Sana</span>
+                <input
+                  type="date"
+                  min={toLocalDateValue(new Date())}
+                  max={toLocalDateValue(addDays(new Date(), 60))}
+                  value={selectedDate}
+                  onChange={(event) => setSelectedDate(event.target.value)}
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <div className="min-w-28 rounded-md bg-blue-50 px-4 py-2 text-center">
+                <div className="text-2xl font-bold text-blue-700">{loading ? "…" : selectedDayCount}</div>
+                <div className="text-[11px] text-blue-700">2-konsultatsiya</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+            {busyDays.map((item) => (
+              <button
+                key={item.date}
+                type="button"
+                onClick={() => setSelectedDate(item.date)}
+                className={`shrink-0 rounded-md border px-3 py-2 text-left text-xs ${
+                  item.date === selectedDate ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 hover:border-blue-300"
+                }`}
+              >
+                <span className="block font-medium">{new Date(`${item.date}T00:00:00`).toLocaleDateString("uz-UZ", { day: "2-digit", month: "short" })}</span>
+                <span>{item.count} ta</span>
+              </button>
+            ))}
+            {!loading && busyDays.length === 0 && <p className="text-xs text-gray-400">Keyingi 60 kunda konsultatsiya topilmadi</p>}
+          </div>
+        </section>
 
         <div className="flex gap-4 overflow-x-auto pb-2">
           {STATUS_COLUMNS.map((col) => {
