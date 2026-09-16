@@ -8,11 +8,45 @@ import { AuthenticatedImage } from "@/components/authenticated-image";
 import { api, ApiError } from "@/lib/api";
 import type { AnalysisQuestionOut, CaseDetail, DentalChartOut } from "@/lib/types";
 
-// The clinic's confirmed photo-capture order for the wizard — one image per
-// step, in exactly this sequence. Anything not in this list (X-rays,
-// leftover face_profile_right/left/3-4 view/face_profile_smile) isn't part
-// of this flow.
-const WIZARD_ORDER = [
+// The full wizard walk-through, one question per item, in the exact order
+// the clinic wants. Almost all items follow "photo N's questions in a
+// row," but the midline pair is special: the clinic wants the upper-jaw
+// midline judged against the face (asked on the frontal-smile photo)
+// immediately followed by the lower-jaw midline judged intraorally — so
+// after the smile photo's other questions, the wizard jumps back to the
+// intraoral-frontal photo for one more question before moving on to 45°
+// smile. `photoCode` matches image_types.code; `question` must match the
+// exact analysis_templates.question text (see the alembic seed).
+const WIZARD_FLOW: { photoCode: string; question: string }[] = [
+  { photoCode: "intraoral_frontal", question: "Prikus turi (old, vertikal)" },
+  { photoCode: "intraoral_frontal", question: "Orqa prikus" },
+  { photoCode: "intraoral_right_buccal", question: "Angle klassi, molyar (6-tish), o'ng" },
+  { photoCode: "intraoral_right_buccal", question: "Angle klassi, klyk (3-tish), o'ng" },
+  { photoCode: "intraoral_left_buccal", question: "Angle klassi, molyar (6-tish), chap" },
+  { photoCode: "intraoral_left_buccal", question: "Angle klassi, klyk (3-tish), chap" },
+  { photoCode: "overjet", question: "Overjet holati" },
+  { photoCode: "intraoral_upper_occlusal", question: "Joy yetishmasligi / qiyshiqlik darajasi" },
+  { photoCode: "intraoral_lower_occlusal", question: "Joy yetishmasligi / qiyshiqlik darajasi" },
+  { photoCode: "face_frontal", question: "Lablar holati" },
+  { photoCode: "face_frontal", question: "Pastki jag' holati (simmetriya)" },
+  { photoCode: "face_frontal", question: "Agar asimmetrik bo'lsa — tomonini yozing" },
+  { photoCode: "face_frontal_m", question: "Yuqori kurak tishlarning ko'rinish darajasi" },
+  { photoCode: "face_frontal_smile", question: "Ekspozitsiya darajasi" },
+  { photoCode: "face_frontal_smile", question: "Milk holati (gummy smile)" },
+  { photoCode: "face_frontal_smile", question: "Tepa jag' markaziy chizig'i (yuzga nisbatan)" },
+  { photoCode: "intraoral_frontal", question: "Pastki jag' markaziy chizig'i" },
+  { photoCode: "face_45_smile", question: "Arka (smile arc) holati" },
+  { photoCode: "face_profile_90_rest", question: "Profil turi" },
+  { photoCode: "face_profile_90_rest", question: "Klass moyilligi" },
+  { photoCode: "face_profile_90_m", question: "Tishlar holati" },
+  { photoCode: "face_profile_90_smile", question: "Tishlar holati" },
+];
+
+// Numbered pills still represent the 13 photos in their natural order —
+// each jumps to that photo's FIRST question in WIZARD_FLOW (so pill 1
+// lands on "Prikus turi", not the later midline jump-back that also uses
+// the intraoral-frontal photo).
+const PILL_CODES = [
   "intraoral_frontal",
   "intraoral_right_buccal",
   "intraoral_left_buccal",
@@ -111,8 +145,7 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
   const [chart, setChart] = useState<DentalChartOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [questionIndex, setQuestionIndex] = useState(0);
+  const [flowIndex, setFlowIndex] = useState(0);
 
   const load = async () => {
     const [q, c, cd] = await Promise.all([
@@ -176,49 +209,27 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
 
   const imageTypeByCode = new Map(caseDetail.image_types.map((t) => [t.code, t]));
   const imageByTypeId = new Map(caseDetail.images.map((img) => [img.image_type_id, img]));
-  const questionsByTypeCode = new Map<string, AnalysisQuestionOut[]>();
+  const questionByKey = new Map<string, AnalysisQuestionOut>();
   for (const q of questions) {
-    const code = q.template.image_type_code;
-    if (!code) continue;
-    if (!questionsByTypeCode.has(code)) questionsByTypeCode.set(code, []);
-    questionsByTypeCode.get(code)!.push(q);
+    if (!q.template.image_type_code) continue;
+    questionByKey.set(`${q.template.image_type_code}::${q.template.question}`, q);
   }
-  const sortedQuestionsFor = (code: string) =>
-    (questionsByTypeCode.get(code) ?? []).slice().sort((a, b) => a.template.sort_order - b.template.sort_order);
 
-  const currentCode = WIZARD_ORDER[stepIndex];
+  const currentItem = WIZARD_FLOW[flowIndex];
+  const currentCode = currentItem.photoCode;
   const currentType = imageTypeByCode.get(currentCode);
   const currentImage = currentType ? imageByTypeId.get(currentType.id) : null;
-  const currentQuestions = sortedQuestionsFor(currentCode);
-  const currentQuestion = currentQuestions[questionIndex] ?? null;
+  const currentQuestion = questionByKey.get(`${currentCode}::${currentItem.question}`) ?? null;
   const dentalChartJaw = DENTAL_CHART_JAW_BY_CODE[currentCode];
 
-  const isVeryFirst = stepIndex === 0 && questionIndex === 0;
-  const isVeryLast = stepIndex === WIZARD_ORDER.length - 1 && questionIndex >= currentQuestions.length - 1;
+  const isVeryFirst = flowIndex === 0;
+  const isVeryLast = flowIndex === WIZARD_FLOW.length - 1;
 
-  const goNext = () => {
-    if (questionIndex < currentQuestions.length - 1) {
-      setQuestionIndex((i) => i + 1);
-    } else if (stepIndex < WIZARD_ORDER.length - 1) {
-      setStepIndex((s) => s + 1);
-      setQuestionIndex(0);
-    }
-  };
-
-  const goBack = () => {
-    if (questionIndex > 0) {
-      setQuestionIndex((i) => i - 1);
-    } else if (stepIndex > 0) {
-      const prevCode = WIZARD_ORDER[stepIndex - 1];
-      const prevCount = sortedQuestionsFor(prevCode).length;
-      setStepIndex((s) => s - 1);
-      setQuestionIndex(Math.max(prevCount - 1, 0));
-    }
-  };
-
-  const goToStep = (idx: number) => {
-    setStepIndex(idx);
-    setQuestionIndex(0);
+  const goNext = () => setFlowIndex((i) => Math.min(WIZARD_FLOW.length - 1, i + 1));
+  const goBack = () => setFlowIndex((i) => Math.max(0, i - 1));
+  const goToPill = (code: string) => {
+    const idx = WIZARD_FLOW.findIndex((item) => item.photoCode === code);
+    if (idx >= 0) setFlowIndex(idx);
   };
 
   return (
@@ -230,26 +241,24 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
           </Link>
           <div>
             <h1 className="text-2xl font-bold">Clinical Analysis Wizard</h1>
-            <p className="text-sm text-gray-500">
-              Bosqich {stepIndex + 1} / {WIZARD_ORDER.length}
-              {currentQuestions.length > 0 && ` — Savol ${questionIndex + 1} / ${currentQuestions.length}`}
-            </p>
+            <p className="text-sm text-gray-500">Savol {flowIndex + 1} / {WIZARD_FLOW.length}</p>
           </div>
         </div>
 
         {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
         <div className="flex flex-wrap gap-1.5">
-          {WIZARD_ORDER.map((code, idx) => {
+          {PILL_CODES.map((code, idx) => {
             const t = imageTypeByCode.get(code);
             const hasImage = t && imageByTypeId.has(t.id);
+            const isActive = code === currentCode;
             return (
               <button
                 key={code}
-                onClick={() => goToStep(idx)}
+                onClick={() => goToPill(code)}
                 title={t?.label ?? code}
                 className={`flex h-7 min-w-7 items-center justify-center rounded border px-1.5 text-xs font-medium ${
-                  idx === stepIndex
+                  isActive
                     ? "border-blue-600 bg-blue-600 text-white"
                     : hasImage
                       ? "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
@@ -293,7 +302,9 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
               {currentQuestion ? (
                 <QuestionField q={currentQuestion} onSave={saveAnswer} />
               ) : (
-                <p className="text-sm text-gray-500">Bu rasm uchun savol kiritilmagan.</p>
+                <p className="text-sm text-gray-500">
+                  Bu savol topilmadi (&quot;{currentItem.question}&quot;) — migratsiya to&apos;liq qo&apos;llanilmagan bo&apos;lishi mumkin.
+                </p>
               )}
             </div>
 
