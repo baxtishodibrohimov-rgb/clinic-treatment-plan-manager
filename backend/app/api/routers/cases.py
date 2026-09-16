@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models.case import TreatmentPlanCase
 from app.models.clinic import Clinic
 from app.models.cliniccards import CliniccardsPatientCache
-from app.models.enums import CaseStatus, ReviewDecision, Role
+from app.models.enums import CaseStatus, ImageSource, ReviewDecision, Role
 from app.models.image import ClinicalImage, ImageType
 from app.models.finding import Finding
 from app.models.audit import AuditLog
@@ -29,7 +29,9 @@ from app.schemas.case import (
     ReviewRequest,
 )
 from app.security.deps import clinic_scope, get_current_user, require_admin, require_role
-from app.services.case_service import assign_case, create_manual_case, submit_review
+from app.services.case_service import assign_case, bulk_upload_images, create_manual_case, save_uploaded_image, submit_review
+
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB per photo — clinical photos, not raw video
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -163,6 +165,11 @@ def create_manual_case_endpoint(
     )
 
 
+def _image_out(image: ClinicalImage) -> ClinicalImageOut:
+    url = image.external_url if image.source != ImageSource.UPLOAD else f"/api/images/{image.id}/file"
+    return ClinicalImageOut(id=image.id, image_type_id=image.image_type_id, external_url=url, source=image.source.value)
+
+
 def _get_case_or_404(db: Session, case_id: uuid.UUID, user: User) -> TreatmentPlanCase:
     case = db.get(TreatmentPlanCase, case_id)
     if not case:
@@ -207,10 +214,52 @@ def get_case(case_id: uuid.UUID, db: Session = Depends(get_db), user: User = Dep
         planner_id=case.responsible_planner_user_id,
         planner_name=planner_name,
         image_types=[ImageTypeOut(id=t.id, code=t.code, label=t.label, category=t.category.value, is_required=t.is_required) for t in image_types],
-        images=[ClinicalImageOut.model_validate(i) for i in images],
+        images=[_image_out(i) for i in images],
         findings=[FindingOut.model_validate(f) for f in findings],
         audit_log=[AuditLogOut.model_validate(a) for a in audit],
     )
+
+
+async def _read_upload(file: UploadFile) -> tuple[str, str, bytes]:
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{file.filename}: fayl juda katta (15 MB dan oshmasin)")
+    return file.filename or "rasm", file.content_type or "application/octet-stream", data
+
+
+@router.post("/{case_id}/images/bulk-upload", response_model=CaseDetail)
+async def bulk_upload_case_images(
+    case_id: uuid.UUID, files: list[UploadFile] = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> CaseDetail:
+    """"Hammasini birga yukla" — files are assigned to this clinic's active
+    image-type slots in their configured display order. There is no image
+    classifier yet, so this is an explicit, transparent ordering rule, not
+    automatic detection; any slot can still be corrected individually via
+    the single-file endpoint below."""
+    case = _get_case_or_404(db, case_id, user)
+    read_files = [await _read_upload(f) for f in files]
+    bulk_upload_images(db, case, read_files)
+    db.commit()
+    return get_case(case_id, db, user)
+
+
+@router.post("/{case_id}/images/{image_type_id}", response_model=CaseDetail)
+async def upload_case_image(
+    case_id: uuid.UUID,
+    image_type_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CaseDetail:
+    """Replace/set a single required-image slot — used to fix a slot the
+    bulk upload above assigned incorrectly, or to add one photo at a time."""
+    case = _get_case_or_404(db, case_id, user)
+    if not db.get(ImageType, image_type_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Rasm turi topilmadi")
+    filename, mime_type, data = await _read_upload(file)
+    save_uploaded_image(db, case, image_type_id, filename=filename, mime_type=mime_type, data=data)
+    db.commit()
+    return get_case(case_id, db, user)
 
 
 @router.post("/{case_id}/assign", status_code=status.HTTP_204_NO_CONTENT)

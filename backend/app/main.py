@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import analysis, auth, cases, clinics, image_types, reminder_rules, settings_router, users, webhook
+from app.api.routers import analysis, auth, cases, clinics, image_types, images, reminder_rules, settings_router, users, webhook
 from app.config import get_settings
 
 settings = get_settings()
@@ -21,6 +21,7 @@ app.include_router(clinics.router)
 app.include_router(users.router)
 app.include_router(cases.router)
 app.include_router(analysis.router)
+app.include_router(images.router)
 app.include_router(image_types.router)
 app.include_router(reminder_rules.router)
 app.include_router(settings_router.router)

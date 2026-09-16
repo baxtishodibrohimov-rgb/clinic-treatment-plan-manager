@@ -106,6 +106,28 @@ show what that field is actually called. A database migration
 auto-created "Bosh klinika" clinic, so upgrading an already-deployed
 single-clinic instance doesn't lose data.
 
+**Manual image upload (Cliniccards not connected yet).** The case detail
+page's "Hammasini birga yuklash" button accepts a multi-file selection and
+assigns each file, in the order given, to the clinic's active image-type
+slots in their configured display order — there is no image classifier
+yet (deliberately deferred, per spec), so this is an explicit, transparent
+ordering rule, not automatic detection. Any single slot can be corrected
+afterward by clicking it directly (`POST /api/cases/{id}/images/{image_type_id}`).
+Files are stored as bytes directly in Postgres (`ClinicalImage.file_data`)
+as a stop-gap — fine for a handful of clinical photos per case, would need
+real object storage (S3/R2) if upload volume grows. Since manually-uploaded
+images have no public URL, they're served back through an authenticated
+`GET /api/images/{id}/file` endpoint; because a plain `<img src>` can't
+attach an Authorization header, the frontend's `AuthenticatedImage`
+component fetches the bytes with the token and renders them as a blob URL
+instead. Verified end-to-end in a real browser: bulk upload assigns files
+correctly by sort order, a single-slot re-upload actually replaces the
+displayed image (a real cache-invalidation bug — the URL string doesn't
+change when a file is replaced in place, so the image component needs an
+explicit remount signal — was caught and fixed during this verification,
+not just written and assumed correct), and a doctor from a different
+clinic gets a 404 fetching another clinic's image file.
+
 **Manual case entry (Cliniccards not connected yet).** `POST
 /api/cases/manual` and the dashboard's "+ Yangi bemor" button let staff
 register a real patient/case by hand — full name, birth date, phone,

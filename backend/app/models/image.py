@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -41,5 +41,13 @@ class ClinicalImage(Base, UUIDPKMixin):
     cliniccards_document_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Manually-uploaded files (source=UPLOAD) are stored directly in Postgres
+    # as a stop-gap until Cliniccards is connected — Cliniccards-sourced
+    # images never populate these, they just use external_url. Fine for a
+    # handful of clinical photos per case; would need real object storage
+    # (S3/R2) if upload volume grows.
+    file_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

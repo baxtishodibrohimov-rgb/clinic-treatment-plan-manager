@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, use as useUnwrap } from "react";
+import { useEffect, useRef, useState, use as useUnwrap } from "react";
 import Link from "next/link";
 import { Shell } from "@/components/shell";
+import { AuthenticatedImage } from "@/components/authenticated-image";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { CaseDetail, UserOut } from "@/lib/types";
@@ -25,6 +26,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [planners, setPlanners] = useState<UserOut[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const bulkInputRef = useRef<HTMLInputElement>(null);
+  const singleInputRef = useRef<HTMLInputElement>(null);
+  const [singleUploadTypeId, setSingleUploadTypeId] = useState<string | null>(null);
+  // A slot's external_url string doesn't change when its file is replaced
+  // (same image id), so AuthenticatedImage wouldn't know to re-fetch —
+  // bump this after every successful upload to force a remount/refetch.
+  const [uploadVersion, setUploadVersion] = useState(0);
 
   const load = async () => {
     const detail = await api.get<CaseDetail>(`/api/cases/${id}`);
@@ -50,6 +59,43 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setError(e instanceof ApiError ? e.message : "Xatolik");
     } finally {
       setAssigning(false);
+    }
+  };
+
+  const onBulkUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      Array.from(files).forEach((f) => form.append("files", f));
+      await api.postForm(`/api/cases/${id}/images/bulk-upload`, form);
+      await load();
+      setUploadVersion((v) => v + 1);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Yuklashda xatolik");
+    } finally {
+      setUploading(false);
+      if (bulkInputRef.current) bulkInputRef.current.value = "";
+    }
+  };
+
+  const onSingleUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !singleUploadTypeId) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", files[0]);
+      await api.postForm(`/api/cases/${id}/images/${singleUploadTypeId}`, form);
+      await load();
+      setUploadVersion((v) => v + 1);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Yuklashda xatolik");
+    } finally {
+      setUploading(false);
+      setSingleUploadTypeId(null);
+      if (singleInputRef.current) singleInputRef.current.value = "";
     }
   };
 
@@ -134,7 +180,36 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
-          <h2 className="font-semibold">Diagnostik rasmlar</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="font-semibold">Diagnostik rasmlar</h2>
+              <p className="text-xs text-gray-500">
+                Bir nechta rasmni birdaniga tanlasangiz, tizim ularni ro&apos;yxatdagi tartib bo&apos;yicha
+                joylashtiradi (hali avtomatik aniqlash yo&apos;q) — keyin har bir katakni alohida bosib to&apos;g&apos;rilashingiz mumkin.
+              </p>
+            </div>
+            <label className="shrink-0 cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
+              {uploading ? "Yuklanmoqda..." : "Hammasini birga yuklash"}
+              <input
+                ref={bulkInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={uploading}
+                onChange={(e) => onBulkUpload(e.target.files)}
+                className="hidden"
+              />
+            </label>
+          </div>
+
+          <input
+            ref={singleInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onSingleUpload(e.target.files)}
+          />
+
           {categories.map((cat) => {
             const typesInCat = data.image_types.filter((t) => t.category === cat);
             if (typesInCat.length === 0) return null;
@@ -146,21 +221,26 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     const img = imagesByType.get(t.id);
                     return (
                       <div key={t.id} className="rounded-md border border-gray-200 p-2 space-y-1">
-                        <div className="flex aspect-square items-center justify-center rounded bg-gray-100 overflow-hidden">
-                          {img ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={img.external_url ?? undefined}
+                        <button
+                          type="button"
+                          title="Bosib rasm yuklash / almashtirish"
+                          onClick={() => {
+                            setSingleUploadTypeId(t.id);
+                            singleInputRef.current?.click();
+                          }}
+                          className="flex aspect-square w-full items-center justify-center overflow-hidden rounded bg-gray-100 hover:opacity-90"
+                        >
+                          {img && img.external_url ? (
+                            <AuthenticatedImage
+                              key={`${img.id}-${uploadVersion}`}
+                              src={img.external_url}
                               alt={t.label}
                               className="h-full w-full object-cover"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).style.display = "none";
-                              }}
                             />
                           ) : (
-                            <span className="text-xs text-gray-400">Yo&apos;q</span>
+                            <span className="text-xs text-gray-400">+ Yuklash</span>
                           )}
-                        </div>
+                        </button>
                         <div className="truncate text-xs font-medium">{t.label}</div>
                         {t.is_required && !img && (
                           <span className="inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">

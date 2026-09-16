@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export class ApiError extends Error {
   status: number;
@@ -8,7 +8,7 @@ export class ApiError extends Error {
   }
 }
 
-function getToken(): string | null {
+export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem("tp_token");
 }
@@ -23,7 +23,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (init?.body && !(init.body instanceof URLSearchParams)) headers["Content-Type"] = "application/json";
+  if (init?.body && !(init.body instanceof URLSearchParams) && !(init.body instanceof FormData)) headers["Content-Type"] = "application/json";
 
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
@@ -45,6 +45,8 @@ export const api = {
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
+  // No Content-Type here — the browser sets the multipart boundary itself.
+  postForm: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form as unknown as BodyInit }),
 };
 
 export async function login(email: string, password: string): Promise<string> {

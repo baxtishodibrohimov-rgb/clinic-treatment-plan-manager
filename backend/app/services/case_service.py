@@ -294,6 +294,57 @@ def recompute_images_progress(db: Session, case: TreatmentPlanCase) -> None:
         set_case_status(db, case, CaseStatus.IMAGES_READY, reason="all required images present")
 
 
+def save_uploaded_image(
+    db: Session, case: TreatmentPlanCase, image_type_id: uuid.UUID, *, filename: str, mime_type: str, data: bytes
+) -> ClinicalImage:
+    """Manual upload (Cliniccards not connected yet): creates or replaces
+    the one image this case has for a given required-image slot. Reuses
+    `recompute_images_progress`/the same 100%-triggers-IMAGES_READY rule
+    real Cliniccards-synced images follow."""
+    existing = db.execute(
+        select(ClinicalImage).where(ClinicalImage.case_id == case.id, ClinicalImage.image_type_id == image_type_id)
+    ).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if existing:
+        existing.source = ImageSource.UPLOAD
+        existing.file_data = data
+        existing.mime_type = mime_type
+        existing.original_filename = filename
+        existing.external_url = None
+        existing.captured_at = now
+        image = existing
+    else:
+        image = ClinicalImage(
+            case_id=case.id,
+            image_type_id=image_type_id,
+            source=ImageSource.UPLOAD,
+            file_data=data,
+            mime_type=mime_type,
+            original_filename=filename,
+            captured_at=now,
+        )
+        db.add(image)
+    db.flush()
+    recompute_images_progress(db, case)
+    return image
+
+
+def bulk_upload_images(
+    db: Session, case: TreatmentPlanCase, files: list[tuple[str, str, bytes]]
+) -> list[ClinicalImage]:
+    """"Hammasini birga yukla": assigns each uploaded file, in the order
+    given, to this clinic's active image-type slots in their configured
+    display order (spec: no real classifier exists yet, so this is an
+    explicit, transparent ordering rule — not AI guesswork — and every
+    slot stays individually correctable via save_uploaded_image after).
+    `files` is a list of (filename, mime_type, data)."""
+    image_types = db.execute(select(ImageType).where(ImageType.is_active.is_(True)).order_by(ImageType.sort_order)).scalars().all()
+    images = []
+    for image_type, (filename, mime_type, data) in zip(image_types, files):
+        images.append(save_uploaded_image(db, case, image_type.id, filename=filename, mime_type=mime_type, data=data))
+    return images
+
+
 def assign_case(db: Session, case: TreatmentPlanCase, planner_user_id: uuid.UUID, *, actor_user_id: uuid.UUID, note: str | None = None) -> None:
     """Admin action (spec section 5, Variant A). Atomic: updates the
     assignment, transitions NEW/WAITING_ASSIGNMENT -> ASSIGNED, writes the
