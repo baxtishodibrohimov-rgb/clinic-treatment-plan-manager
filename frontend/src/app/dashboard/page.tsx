@@ -71,6 +71,7 @@ function statusBg(status: CaseStatus): string {
 
 function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { isSuperAdmin } = useAuth();
+  const [mode, setMode] = useState<"manual" | "by_card">("by_card");
   const [doctors, setDoctors] = useState<DoctorOut[]>([]);
   const [clinics, setClinics] = useState<ClinicOut[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +80,7 @@ function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreate
     full_name: "",
     birth_date: "",
     phone: "",
+    cliniccards_patient_id: "",
     doctor_name: "",
     consultation_datetime: toLocalDatetimeInputValue(new Date()),
     priority: "normal",
@@ -103,15 +105,25 @@ function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreate
     setError(null);
     setSaving(true);
     try {
-      await api.post("/api/cases/manual", {
-        full_name: form.full_name,
-        birth_date: form.birth_date || null,
-        phone: form.phone || null,
-        doctor_name: form.doctor_name || null,
-        consultation_datetime: new Date(form.consultation_datetime).toISOString(),
-        priority: form.priority,
-        clinic_id: form.clinic_id || null,
-      });
+      if (mode === "by_card") {
+        await api.post("/api/cases/manual/by-cliniccards-id", {
+          cliniccards_patient_id: form.cliniccards_patient_id,
+          doctor_name: form.doctor_name || null,
+          consultation_datetime: new Date(form.consultation_datetime).toISOString(),
+          priority: form.priority,
+          clinic_id: form.clinic_id || null,
+        });
+      } else {
+        await api.post("/api/cases/manual", {
+          full_name: form.full_name,
+          birth_date: form.birth_date || null,
+          phone: form.phone || null,
+          doctor_name: form.doctor_name || null,
+          consultation_datetime: new Date(form.consultation_datetime).toISOString(),
+          priority: form.priority,
+          clinic_id: form.clinic_id || null,
+        });
+      }
       onCreated();
       onClose();
     } catch (e) {
@@ -131,38 +143,73 @@ function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreate
           </button>
         </div>
 
+        <div className="flex rounded-md border border-divider p-0.5 text-sm">
+          <button
+            type="button"
+            onClick={() => setMode("by_card")}
+            className={`flex-1 rounded px-3 py-1.5 ${mode === "by_card" ? "bg-accent text-white" : "text-muted"}`}
+          >
+            Karta raqami orqali
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("manual")}
+            className={`flex-1 rounded px-3 py-1.5 ${mode === "manual" ? "bg-accent text-white" : "text-muted"}`}
+          >
+            Qo&apos;lda kiritish
+          </button>
+        </div>
+
         {error && <div className="rounded-md bg-status-other-bg px-3 py-2 text-sm text-status-other">{error}</div>}
 
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted">F.I.Sh *</label>
-          <input
-            required
-            value={form.full_name}
-            onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-            className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-          />
-        </div>
+        {mode === "by_card" ? (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted">Cliniccards karta raqami *</label>
+            <input
+              required
+              value={form.cliniccards_patient_id}
+              onChange={(e) => setForm({ ...form, cliniccards_patient_id: e.target.value })}
+              placeholder="masalan CC-1042"
+              className="w-full rounded-md border border-divider px-3 py-2 text-sm"
+            />
+            <p className="text-xs text-muted">
+              F.I.Sh, tug&apos;ilgan sana, telefon va mavjud rasmlar Cliniccardsdan avtomatik olinadi.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted">F.I.Sh *</label>
+              <input
+                required
+                value={form.full_name}
+                onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                className="w-full rounded-md border border-divider px-3 py-2 text-sm"
+              />
+            </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted">Tug&apos;ilgan sana</label>
-            <input
-              type="date"
-              value={form.birth_date}
-              onChange={(e) => setForm({ ...form, birth_date: e.target.value })}
-              className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted">Telefon</label>
-            <input
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              placeholder="+998..."
-              className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-            />
-          </div>
-        </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted">Tug&apos;ilgan sana</label>
+                <input
+                  type="date"
+                  value={form.birth_date}
+                  onChange={(e) => setForm({ ...form, birth_date: e.target.value })}
+                  className="w-full rounded-md border border-divider px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted">Telefon</label>
+                <input
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="+998..."
+                  className="w-full rounded-md border border-divider px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted">Shifokor</label>

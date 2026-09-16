@@ -14,6 +14,7 @@ from app.models.image import ClinicalImage, ImageType
 from app.models.finding import Finding
 from app.models.audit import AuditLog
 from app.models.user import User, UserRole
+from app.integrations.cliniccards.factory import get_cliniccards_adapter
 from app.schemas.case import (
     AssignCaseRequest,
     AssignFromPoolRequest,
@@ -27,6 +28,7 @@ from app.schemas.case import (
     FindingOut,
     ImageTypeOut,
     ManualCaseCreateRequest,
+    ManualCaseFromCliniccardsRequest,
     PatientSummary,
     ReviewRequest,
 )
@@ -34,6 +36,7 @@ from app.security.deps import clinic_scope, get_current_user, require_admin, req
 from app.services.case_service import (
     assign_case,
     assign_pool_image_to_slot,
+    create_case_from_cliniccards_patient,
     create_manual_case,
     save_uploaded_image,
     submit_review,
@@ -182,8 +185,9 @@ def list_doctors(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | Non
 def create_manual_case_endpoint(
     payload: ManualCaseCreateRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> CaseListItem:
-    """Cliniccards isn't connected yet — this lets staff register a real
-    patient/case directly until it is (spec: manual data entry fallback)."""
+    """Registers a patient who isn't in Cliniccards at all. For a patient who
+    already has a Cliniccards card, use /manual/by-cliniccards-id below
+    instead so the case is tied to their real record."""
     if user.is_super_admin:
         if payload.clinic_id is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "clinic_id majburiy")
@@ -216,6 +220,62 @@ def create_manual_case_endpoint(
         deadline=case.deadline,
         images_progress_percent=case.images_progress_percent,
         patient_name=payload.full_name,
+        doctor_name=case.primary_doctor_name,
+        planner_name=planner_name,
+        clinic_id=clinic_id,
+        clinic_name=clinic_name,
+    )
+
+
+@router.post("/manual/by-cliniccards-id", response_model=CaseListItem, status_code=status.HTTP_201_CREATED)
+async def create_case_from_cliniccards_id_endpoint(
+    payload: ManualCaseFromCliniccardsRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> CaseListItem:
+    """Staff already knows the patient's real Cliniccards card number (e.g.
+    they just walked in with their card, or their 2nd visit hasn't synced
+    yet) and wants to open a case for them right now, without typing their
+    details in by hand — pulled straight from Cliniccards instead."""
+    if user.is_super_admin:
+        if payload.clinic_id is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "clinic_id majburiy")
+        clinic_id = payload.clinic_id
+    else:
+        clinic_id = user.clinic_id
+        if clinic_id is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sizga hech qanday klinika biriktirilmagan")
+
+    adapter = get_cliniccards_adapter()
+    try:
+        case = await create_case_from_cliniccards_patient(
+            db,
+            adapter,
+            cliniccards_patient_id=payload.cliniccards_patient_id,
+            doctor_name=payload.doctor_name,
+            consultation_datetime=payload.consultation_datetime,
+            clinic_id=clinic_id,
+            priority=payload.priority,
+        )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from None
+    db.commit()
+    db.refresh(case)
+
+    patient = db.execute(
+        select(CliniccardsPatientCache).where(
+            CliniccardsPatientCache.cliniccards_patient_id == case.cliniccards_patient_id
+        )
+    ).scalar_one_or_none()
+    clinic_name = db.get(Clinic, clinic_id).name if clinic_id else None
+    planner_name = db.get(User, case.responsible_planner_user_id).full_name if case.responsible_planner_user_id else None
+    return CaseListItem(
+        id=case.id,
+        status=case.status,
+        priority=case.priority,
+        consultation_datetime=case.consultation_datetime,
+        deadline=case.deadline,
+        images_progress_percent=case.images_progress_percent,
+        patient_name=patient.full_name if patient else payload.cliniccards_patient_id,
         doctor_name=case.primary_doctor_name,
         planner_name=planner_name,
         clinic_id=clinic_id,

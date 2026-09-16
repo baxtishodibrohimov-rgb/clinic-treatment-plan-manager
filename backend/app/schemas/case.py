@@ -105,6 +105,18 @@ class ManualCaseCreateRequest(BaseModel):
     clinic_id: uuid.UUID | None = None
 
 
+class ManualCaseFromCliniccardsRequest(BaseModel):
+    """Staff already knows the patient's real Cliniccards card number and
+    wants to open a case for them right now, instead of waiting for their
+    2nd-visit appointment to sync automatically."""
+
+    cliniccards_patient_id: str
+    doctor_name: str | None = None
+    consultation_datetime: datetime
+    priority: Priority = Priority.NORMAL
+    clinic_id: uuid.UUID | None = None
+
+
 class DoctorOut(BaseModel):
     id: uuid.UUID
     full_name: str

@@ -202,13 +202,14 @@ def create_manual_case(
     clinic_id: uuid.UUID,
     priority=None,
 ) -> TreatmentPlanCase:
-    """Manual data entry (spec: Cliniccards not connected yet, staff needs
-    to register real patients directly). Synthesizes a "MANUAL-..." patient
-    id and appointment id so this reuses the exact same
-    CliniccardsPatientCache/CliniccardsAppointmentCache/ensure_case pipeline
-    as a real Cliniccards sync — nothing about downstream case handling
-    (state machine, assignment, deadlines) has a separate code path to
-    maintain for manually-entered cases."""
+    """Fully manual data entry, for a patient who isn't in Cliniccards at
+    all (or staff doesn't want to look them up by card number — see
+    create_case_from_cliniccards_patient below for that). Synthesizes a
+    "MANUAL-..." patient id and appointment id so this reuses the exact
+    same CliniccardsPatientCache/CliniccardsAppointmentCache/ensure_case
+    pipeline as a real Cliniccards sync — nothing about downstream case
+    handling (state machine, assignment, deadlines) has a separate code
+    path to maintain for manually-entered cases."""
     patient_id = f"MANUAL-{uuid.uuid4()}"
     now = datetime.now(timezone.utc)
     db.add(
@@ -237,6 +238,47 @@ def create_manual_case(
     case, _ = ensure_case(db, appt, clinic_id, source="manual")
     if priority is not None:
         case.priority = priority
+    return case
+
+
+async def create_case_from_cliniccards_patient(
+    db: Session,
+    adapter: CliniccardsAdapter,
+    *,
+    cliniccards_patient_id: str,
+    doctor_name: str | None,
+    consultation_datetime: datetime,
+    clinic_id: uuid.UUID,
+    priority=None,
+) -> TreatmentPlanCase:
+    """Staff already knows the patient's real Cliniccards card number and
+    wants to open a case for them right now, rather than waiting for their
+    2nd-visit appointment to sync automatically. Unlike create_manual_case
+    above, this keeps the real cliniccards_patient_id — not a synthesized
+    "MANUAL-..." one — so the case's patient identity matches Cliniccards
+    exactly and we can pull that patient's existing images immediately."""
+    patient = await adapter.get_patient(cliniccards_patient_id)
+    if not patient:
+        raise ValueError("Bu karta raqami bo'yicha Cliniccardsda bemor topilmadi")
+
+    await upsert_patient_cache(db, adapter, cliniccards_patient_id)
+
+    appt = CliniccardsAppointment(
+        appointment_id=f"MANUAL-{uuid.uuid4()}",
+        patient_id=cliniccards_patient_id,
+        doctor_name=doctor_name,
+        appointment_type_code="manual_by_card",
+        appointment_type_label="Karta raqami orqali kiritilgan",
+        scheduled_at=consultation_datetime,
+        note=None,
+        raw={"manual_by_card": True},
+    )
+    upsert_appointment_cache(db, appt)
+    case, _ = ensure_case(db, appt, clinic_id, source="manual_by_card")
+    if priority is not None:
+        case.priority = priority
+
+    await import_images(db, adapter, case, cliniccards_patient_id)
     return case
 
 
