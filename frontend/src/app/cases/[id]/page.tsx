@@ -124,13 +124,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               <div className="h-2 rounded-full bg-blue-500" style={{ width: `${data.images_progress_percent}%` }} />
             </div>
             <div className="text-sm text-gray-500">{data.images_progress_percent}% majburiy rasmlar tayyor</div>
-            <button
-              disabled
-              title="Clinical Analysis Wizard — Phase 5da qo'shiladi"
-              className="w-full rounded-md bg-gray-200 px-3 py-2 text-sm font-medium text-gray-500 cursor-not-allowed"
+            <Link
+              href={`/cases/${id}/analysis`}
+              className="block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
             >
               TAHLILNI BOSHLASH
-            </button>
+            </Link>
           </div>
         </div>
 

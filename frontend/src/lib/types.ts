@@ -115,6 +115,46 @@ export interface AssignmentConfigOut {
   strategy: "least_workload" | "round_robin";
 }
 
+export type AnswerType = "single_choice" | "multi_choice" | "boolean" | "text" | "measurement";
+
+export interface AnalysisTemplateOut {
+  id: string;
+  image_type_id: string | null;
+  image_type_code: string | null;
+  category: string | null;
+  question: string;
+  answer_type: AnswerType;
+  options: string[];
+  sort_order: number;
+}
+
+export interface AnalysisAnswerOut {
+  template_id: string;
+  answer_value: { value: string | boolean | string[] } | null;
+  note: string | null;
+  answered_by_user_id: string | null;
+  answered_at: string | null;
+}
+
+export interface AnalysisQuestionOut {
+  template: AnalysisTemplateOut;
+  answer: AnalysisAnswerOut | null;
+}
+
+export interface ToothStatusOut {
+  quadrant: number;
+  position: number;
+  dentition: "permanent" | "primary" | null;
+  tooth_code: string;
+  notes: string | null;
+}
+
+export interface DentalChartOut {
+  id: string;
+  numbering_system: string;
+  teeth: ToothStatusOut[];
+}
+
 export interface SyncLogOut {
   id: string;
   sync_type: string;

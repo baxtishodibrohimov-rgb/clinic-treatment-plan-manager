@@ -106,11 +106,26 @@ show what that field is actually called. A database migration
 auto-created "Bosh klinika" clinic, so upgrading an already-deployed
 single-clinic instance doesn't lose data.
 
-**Phases 5–12** are not built — the case detail page shows exactly what
-exists today (patient info, image gallery with required/missing badges,
-progress %, assignment, Master Problem List placeholder, audit log) and a
-disabled "TAHLILNI BOSHLASH" button explaining the wizard lands in Phase 5.
-See ARCHITECTURE.md → Phase plan for what's schema-ready vs. still needed.
+**Phase 5 — Clinical Analysis Wizard (og'iz ichi + profil).** The
+questionnaire (33 questions across intraoral-frontal, intraoral-buccal
+left/right, and 5 extraoral/profile photo types) was dictated by the
+clinic owner and seeded verbatim via migration `970995590f0f` as
+`AnalysisTemplate` rows — nothing clinical was invented. `/cases/{id}/analysis`
+renders it grouped by photo type, saves answers via
+`PUT /api/cases/{id}/analysis-answers/{template_id}`, and includes an
+interactive FDI-numbered dental chart (`ToothStatus`, redesigned in
+migration `3938cb64131c` to be position-keyed instead of code-keyed):
+single click marks a tooth missing, double click toggles primary↔permanent
+(or empty↔permanent for positions 6-8, which have no primary variant), and
+a "Sut tish / Doimiy tish" button bulk-resets the whole chart — this is
+exactly what mixed dentition in children requires. Verified end-to-end
+against a real Postgres + a headless-browser run: answers and tooth state
+both survive a full page reload. X-ray (OPG/lateral ceph) questions and
+Findings/Master-Problem-List generation from these answers are not built
+yet — the manual for those hasn't been provided.
+
+**Phases 6–12** are not built — see ARCHITECTURE.md → Phase plan for
+what's schema-ready vs. still needed.
 
 ## Project structure
 
