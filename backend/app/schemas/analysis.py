@@ -20,6 +20,7 @@ class AnalysisTemplateOut(BaseModel):
 
 
 class AnalysisAnswerOut(BaseModel):
+    id: uuid.UUID
     template_id: uuid.UUID
     answer_value: dict | None
     note: str | None

@@ -63,6 +63,20 @@ def _bulk_names(db: Session, cases: list[TreatmentPlanCase]) -> tuple[dict[str, 
     return {p.cliniccards_patient_id: p.full_name for p in patients}, {u.id: u.full_name for u in users}
 
 
+def _bulk_face_photos(db: Session, cases: list[TreatmentPlanCase]) -> dict[uuid.UUID, str]:
+    """Face-frontal thumbnail per case, for the dashboard's patient cards."""
+    face_type = db.execute(select(ImageType).where(ImageType.code == "face_frontal")).scalar_one_or_none()
+    if not face_type:
+        return {}
+    case_ids = [c.id for c in cases]
+    if not case_ids:
+        return {}
+    images = db.execute(
+        select(ClinicalImage).where(ClinicalImage.case_id.in_(case_ids), ClinicalImage.image_type_id == face_type.id)
+    ).scalars().all()
+    return {img.case_id: _image_out(img).external_url for img in images if _image_out(img).external_url}
+
+
 @router.get("", response_model=list[CaseListItem], dependencies=[Depends(get_current_user)])
 def list_cases(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | None = Depends(clinic_scope)) -> list[CaseListItem]:
     query = select(TreatmentPlanCase).order_by(TreatmentPlanCase.consultation_datetime)
@@ -71,6 +85,7 @@ def list_cases(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | None 
     cases = db.execute(query).scalars().all()
     patient_names, user_names = _bulk_names(db, cases)
     clinic_names = {c.id: c.name for c in db.execute(select(Clinic)).scalars().all()}
+    face_photos = _bulk_face_photos(db, cases)
 
     return [
         CaseListItem(
@@ -85,6 +100,7 @@ def list_cases(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | None 
             planner_name=user_names.get(c.responsible_planner_user_id) if c.responsible_planner_user_id else None,
             clinic_id=c.clinic_id,
             clinic_name=clinic_names.get(c.clinic_id) if c.clinic_id else None,
+            face_photo_url=face_photos.get(c.id),
         )
         for c in cases
     ]

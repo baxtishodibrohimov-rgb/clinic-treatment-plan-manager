@@ -43,6 +43,7 @@ export interface CaseListItem {
   planner_name: string | null;
   clinic_id: string | null;
   clinic_name: string | null;
+  face_photo_url: string | null;
 }
 
 export interface DoctorOut {
@@ -85,6 +86,7 @@ export interface FindingOut {
   description: string;
   severity: string | null;
   is_confirmed: boolean;
+  source_answer_id: string | null;
 }
 
 export interface AuditLogOut {
@@ -140,6 +142,7 @@ export interface AnalysisTemplateOut {
 }
 
 export interface AnalysisAnswerOut {
+  id: string;
   template_id: string;
   answer_value: { value: string | boolean | string[] } | null;
   note: string | null;

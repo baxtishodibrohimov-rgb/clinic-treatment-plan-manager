@@ -6,7 +6,7 @@ import { Shell } from "@/components/shell";
 import { DentalChart } from "@/components/dental-chart";
 import { AuthenticatedImage } from "@/components/authenticated-image";
 import { api, ApiError } from "@/lib/api";
-import type { AnalysisQuestionOut, CaseDetail, DentalChartOut } from "@/lib/types";
+import type { AnalysisAnswerOut, AnalysisQuestionOut, CaseDetail, DentalChartOut } from "@/lib/types";
 
 // The full wizard walk-through, one question per item, in the exact order
 // the clinic wants. Almost all items follow "photo N's questions in a
@@ -167,14 +167,8 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
 
   const saveAnswer = async (templateId: string, value: string | boolean) => {
     try {
-      await api.put(`/api/cases/${id}/analysis-answers/${templateId}`, { value });
-      setQuestions((prev) =>
-        prev.map((q) =>
-          q.template.id === templateId
-            ? { ...q, answer: { template_id: templateId, answer_value: { value }, note: null, answered_by_user_id: null, answered_at: new Date().toISOString() } }
-            : q
-        )
-      );
+      const saved = await api.put<AnalysisAnswerOut>(`/api/cases/${id}/analysis-answers/${templateId}`, { value });
+      setQuestions((prev) => prev.map((q) => (q.template.id === templateId ? { ...q, answer: saved } : q)));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Saqlashda xatolik");
     }

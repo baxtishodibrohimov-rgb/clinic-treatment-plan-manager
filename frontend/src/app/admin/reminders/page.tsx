@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { api } from "@/lib/api";
 import type { ReminderRuleOut } from "@/lib/types";
@@ -33,6 +34,7 @@ export default function RemindersPage() {
   return (
     <Shell>
       <div className="space-y-4">
+        <Link href="/admin/settings-hub" className="text-sm text-accent hover:underline">← Sozlamalar</Link>
         <div>
           <h1 className="text-2xl font-bold">Eslatma qoidalari</h1>
           <p className="text-sm text-gray-500">Qachon va kimga Telegram eslatma yuborilishini boshqaring</p>

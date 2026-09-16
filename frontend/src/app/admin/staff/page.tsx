@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -119,6 +120,7 @@ export default function StaffPage() {
   return (
     <Shell>
       <div className="space-y-4">
+        <Link href="/admin/settings-hub" className="text-sm text-accent hover:underline">← Sozlamalar</Link>
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Xodimlar va rollar</h1>

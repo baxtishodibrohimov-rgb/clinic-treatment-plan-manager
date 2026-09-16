@@ -6,23 +6,51 @@ import { Shell } from "@/components/shell";
 import { AuthenticatedImage } from "@/components/authenticated-image";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import type { CaseDetail, ClinicalImageOut, UserOut } from "@/lib/types";
+import type { AnalysisQuestionOut, CaseDetail, CaseStatus, ClinicalImageOut, UserOut } from "@/lib/types";
 
+const CATEGORY_ORDER = ["intraoral", "extraoral", "radiology"] as const;
 const CATEGORY_LABELS: Record<string, string> = {
-  extraoral: "Extraoral",
   intraoral: "Intraoral",
-  radiology: "Radiology",
+  extraoral: "Extraoral",
+  radiology: "Radiologiya",
 };
+
+const STATUS_LABELS: Record<CaseStatus, string> = {
+  NEW: "Yangi",
+  WAITING_ASSIGNMENT: "Biriktirish kutilmoqda",
+  ASSIGNED: "Biriktirilgan",
+  IMAGES_READY: "Rasmlar tayyor",
+  ANALYSIS_IN_PROGRESS: "Tahlil qilinmoqda",
+  PLAN_IN_PROGRESS: "Plan tayyorlanmoqda",
+  REVIEW_REQUIRED: "Review kutilmoqda",
+  READY: "Tayyor",
+  OVERDUE: "Kechikkan",
+  CONSULTATION_COMPLETED: "Yakunlangan",
+};
+
+function statusColor(status: CaseStatus): string {
+  if (status === "READY" || status === "CONSULTATION_COMPLETED") return "#15803D";
+  if (status === "NEW") return "#6B7280";
+  return "#B91C1C";
+}
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("uz-UZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function answerText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Ha" : "Yo'q";
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value);
+}
+
 export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = useUnwrap(params);
   const { isAdmin } = useAuth();
   const [data, setData] = useState<CaseDetail | null>(null);
+  const [questions, setQuestions] = useState<AnalysisQuestionOut[]>([]);
   const [planners, setPlanners] = useState<UserOut[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
@@ -39,8 +67,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [poolPickerFor, setPoolPickerFor] = useState<string | null>(null);
 
   const load = async () => {
-    const detail = await api.get<CaseDetail>(`/api/cases/${id}`);
+    const [detail, qs] = await Promise.all([
+      api.get<CaseDetail>(`/api/cases/${id}`),
+      api.get<AnalysisQuestionOut[]>(`/api/cases/${id}/analysis-questions`),
+    ]);
     setData(detail);
+    setQuestions(qs);
     if (isAdmin) {
       const roster = await api.get<UserOut[]>("/api/users/planners");
       setPlanners(roster);
@@ -119,7 +151,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   if (error) {
     return (
       <Shell>
-        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        <div className="rounded-md bg-status-other-bg px-3 py-2 text-sm text-status-other">{error}</div>
       </Shell>
     );
   }
@@ -127,49 +159,85 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   if (!data) {
     return (
       <Shell>
-        <p className="text-gray-500">Yuklanmoqda...</p>
+        <p className="text-muted">Yuklanmoqda...</p>
       </Shell>
     );
   }
 
   const imagesByType = new Map(data.images.map((img) => [img.image_type_id, img]));
   const poolImages = data.pool_images ?? [];
-  const categories = ["extraoral", "intraoral", "radiology"];
   const poolPickerType = poolPickerFor ? data.image_types.find((t) => t.id === poolPickerFor) : null;
+  const faceType = data.image_types.find((t) => t.code === "face_frontal");
+  const faceImage = faceType ? imagesByType.get(faceType.id) : null;
+
+  const answeredQuestions = questions.filter((q) => q.answer && q.answer.answer_value !== null && q.answer.answer_value !== undefined);
+  const findingsByAnswerId = new Map(data.findings.filter((f) => f.source_answer_id).map((f) => [f.source_answer_id as string, f]));
 
   return (
     <Shell>
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <Link href="/dashboard" className="text-gray-500 hover:text-gray-700">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Link href="/dashboard" className="text-sm text-muted hover:text-ink">
             ← Orqaga
           </Link>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold">{data.patient?.full_name ?? "Noma'lum bemor"}</h1>
-            <p className="text-sm text-gray-500">2-konsultatsiya: {fmt(data.consultation_datetime)}</p>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-base font-medium text-ink">{data.patient?.full_name ?? "Noma'lum bemor"}</div>
+            <div className="text-xs text-muted">2-konsultatsiya: {fmt(data.consultation_datetime)}</div>
           </div>
-          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium">{data.status}</span>
+          <span
+            className="whitespace-nowrap rounded px-2.5 py-1 text-xs"
+            style={{ color: statusColor(data.status), border: `1px solid ${statusColor(data.status)}` }}
+          >
+            {STATUS_LABELS[data.status] ?? data.status}
+          </span>
+          <Link
+            href={`/cases/${id}/present`}
+            className="whitespace-nowrap rounded-md border border-divider px-3 py-1.5 text-sm text-body hover:bg-tag-neutral-bg"
+          >
+            Prezentatsiya tayyorlash
+          </Link>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2 text-sm">
-            <h2 className="font-semibold mb-2">Case ma&apos;lumotlari</h2>
-            <div><span className="text-gray-500">Doktor:</span> {data.doctor_name ?? "—"}</div>
-            <div><span className="text-gray-500">Telefon:</span> {data.patient?.phone ?? "—"}</div>
-            <div><span className="text-gray-500">Tug&apos;ilgan sana:</span> {data.patient?.birth_date ?? "—"}</div>
-            <div><span className="text-gray-500">Deadline:</span> {fmt(data.deadline)}</div>
-            <div><span className="text-gray-500">Priority:</span> {data.priority}</div>
+        <div className="grid gap-4 lg:grid-cols-[220px_repeat(3,minmax(0,1fr))]">
+          <button
+            type="button"
+            onClick={() => {
+              if (!faceType) return;
+              setSingleUploadTypeId(faceType.id);
+              singleInputRef.current?.click();
+            }}
+            title="Bosh rasmni almashtirish"
+            className="flex min-h-[260px] items-center justify-center overflow-hidden rounded-lg bg-tag-neutral-bg"
+          >
+            {faceImage && faceImage.external_url ? (
+              <AuthenticatedImage
+                key={`${faceImage.id}-${uploadVersion}`}
+                src={faceImage.external_url}
+                alt={data.patient?.full_name ?? ""}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span className="text-xs text-muted">+ Bosh rasm</span>
+            )}
+          </button>
+
+          <div className="rounded-lg border border-divider bg-surface p-4 text-sm">
+            <h2 className="mb-1.5 font-medium text-ink">Case ma&apos;lumotlari</h2>
+            <div className="text-body"><span className="text-muted">Doktor:</span> {data.doctor_name ?? "—"}</div>
+            <div className="text-body"><span className="text-muted">Telefon:</span> {data.patient?.phone ?? "—"}</div>
+            <div className="text-body"><span className="text-muted">Tug&apos;ilgan sana:</span> {data.patient?.birth_date ?? "—"}</div>
+            <div className="text-body"><span className="text-muted">Deadline:</span> {fmt(data.deadline)}</div>
           </div>
 
-          <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-            <h2 className="font-semibold">Mas&apos;ul planner</h2>
-            <div className="text-sm">{data.planner_name ?? <span className="text-gray-400">Biriktirilmagan</span>}</div>
+          <div className="rounded-lg border border-divider bg-surface p-4">
+            <h2 className="mb-1.5 text-sm font-medium text-ink">Mas&apos;ul planner</h2>
+            <div className="text-sm text-body">{data.planner_name ?? <span className="text-muted">Biriktirilmagan</span>}</div>
             {isAdmin && (
               <select
                 defaultValue=""
                 disabled={assigning}
                 onChange={(e) => onAssign(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                className="mt-2 w-full rounded-md border border-divider px-2 py-1.5 text-sm"
               >
                 <option value="" disabled>
                   Planner tanlash / o&apos;zgartirish
@@ -183,17 +251,17 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             )}
           </div>
 
-          <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-            <h2 className="font-semibold">Diagnostika progress</h2>
-            <div className="h-2 w-full rounded-full bg-gray-100">
-              <div className="h-2 rounded-full bg-blue-500" style={{ width: `${data.images_progress_percent}%` }} />
+          <div className="rounded-lg border border-divider bg-surface p-4">
+            <h2 className="mb-1.5 text-sm font-medium text-ink">Diagnostika progress</h2>
+            <div className="my-1.5 h-1.5 w-full overflow-hidden rounded-full bg-tag-neutral-bg">
+              <div className="h-full bg-accent" style={{ width: `${data.images_progress_percent}%` }} />
             </div>
-            <div className="text-sm text-gray-500">{data.images_progress_percent}% majburiy rasmlar tayyor</div>
+            <div className="mb-2 text-xs text-muted">{data.images_progress_percent}% majburiy rasmlar tayyor</div>
             <Link
               href={`/cases/${id}/analysis`}
-              className="block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
+              className="block w-full rounded-md bg-accent px-3 py-2 text-center text-sm font-medium text-white hover:bg-accent-hover"
             >
-              TAHLILNI BOSHLASH
+              Tahlilni boshlash
             </Link>
           </div>
         </div>
@@ -210,20 +278,20 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             setDragOverBulk(false);
             if (e.dataTransfer.files?.length) onBulkUpload(e.dataTransfer.files);
           }}
-          className={`rounded-lg border p-4 space-y-4 transition-colors ${
-            dragOverBulk ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white"
+          className={`space-y-4 rounded-lg border p-4 transition-colors ${
+            dragOverBulk ? "border-accent bg-tag-accent-bg" : "border-divider bg-surface"
           }`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="font-semibold">Diagnostik rasmlar</h2>
-              <p className="text-xs text-gray-500">
-                &quot;Hammasini yuklash&quot; rasmlarni pastdagi <strong>bulutga</strong> tashlaydi — hali avtomatik
-                aniqlash yo&apos;q. Har bir katak ostidagi <strong>+</strong> tugmasi kompyuterdan to&apos;g&apos;ridan-to&apos;g&apos;ri
-                yuklaydi, <strong>☁️</strong> tugmasi esa bulutdagi rasmlardan birini shu joyga biriktiradi.
+              <h2 className="font-medium text-ink">Diagnostik rasmlar</h2>
+              <p className="text-xs text-muted">
+                &quot;Hammasini yuklash&quot; rasmlarni pastdagi <strong>bulutga</strong> tashlaydi. Har bir katak ostidagi{" "}
+                <strong>+</strong> tugmasi kompyuterdan to&apos;g&apos;ridan-to&apos;g&apos;ri yuklaydi, <strong>☁️</strong> tugmasi
+                esa bulutdagi rasmlardan birini shu joyga biriktiradi.
               </p>
             </div>
-            <label className="shrink-0 cursor-pointer rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            <label className="shrink-0 cursor-pointer rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover">
               {uploading ? "Yuklanmoqda..." : "Hammasini yuklash (bulutga)"}
               <input
                 ref={bulkInputRef}
@@ -237,25 +305,19 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             </label>
           </div>
 
-          <input
-            ref={singleInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => onSingleUpload(e.target.files)}
-          />
+          <input ref={singleInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => onSingleUpload(e.target.files)} />
 
-          {categories.map((cat) => {
+          {CATEGORY_ORDER.map((cat) => {
             const typesInCat = data.image_types.filter((t) => t.category === cat);
             if (typesInCat.length === 0) return null;
             return (
               <div key={cat} className="space-y-2">
-                <h3 className="text-sm font-semibold">{CATEGORY_LABELS[cat] ?? cat}</h3>
+                <h3 className="text-sm font-medium text-ink">{CATEGORY_LABELS[cat] ?? cat}</h3>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
                   {typesInCat.map((t) => {
                     const img = imagesByType.get(t.id);
                     return (
-                      <div key={t.id} className="rounded-md border border-gray-200 p-2 space-y-1">
+                      <div key={t.id} className="space-y-1 rounded-md border border-divider p-2">
                         <div
                           onDragOver={(e) => {
                             if (!isImageDrag(e)) return;
@@ -274,7 +336,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             if (e.dataTransfer.files?.length) onSingleUpload(e.dataTransfer.files, t.id);
                           }}
                           className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded transition-colors ${
-                            dragOverSlot === t.id ? "bg-blue-100 ring-2 ring-blue-400" : "bg-gray-100"
+                            dragOverSlot === t.id ? "bg-tag-accent-bg ring-2 ring-accent" : "bg-tag-neutral-bg"
                           }`}
                         >
                           {img && img.external_url ? (
@@ -285,16 +347,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               className="h-full w-full object-cover"
                             />
                           ) : (
-                            <span className="text-xs text-gray-400">Bo&apos;sh</span>
+                            <span className="text-xs text-muted">Bo&apos;sh</span>
                           )}
                         </div>
-                        <div className="truncate text-xs font-medium">{t.label}</div>
+                        <div className="truncate text-xs font-medium text-ink">{t.label}</div>
                         {t.is_required && !img && (
-                          <span className="inline-block rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">
-                            Majburiy — yo&apos;q
-                          </span>
+                          <span className="inline-block rounded bg-status-other-bg px-1.5 py-0.5 text-[10px] text-status-other">Majburiy</span>
                         )}
-                        {img && <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">Bor</span>}
+                        {img && <span className="inline-block rounded bg-tag-neutral-bg px-1.5 py-0.5 text-[10px] text-tag-neutral-text">Bor</span>}
                         <div className="flex gap-1 pt-1">
                           <button
                             type="button"
@@ -303,7 +363,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                               setSingleUploadTypeId(t.id);
                               singleInputRef.current?.click();
                             }}
-                            className="flex h-7 w-7 items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-50"
+                            className="flex h-7 w-7 items-center justify-center rounded border border-divider text-sm hover:bg-tag-neutral-bg"
                           >
                             +
                           </button>
@@ -311,7 +371,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                             type="button"
                             title="Bulutdan tanlash"
                             onClick={() => setPoolPickerFor(t.id)}
-                            className="flex h-7 w-7 items-center justify-center rounded border border-gray-300 text-sm hover:bg-gray-50"
+                            className="flex h-7 w-7 items-center justify-center rounded border border-divider text-sm hover:bg-tag-neutral-bg"
                           >
                             ☁️
                           </button>
@@ -324,14 +384,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             );
           })}
 
-          <div className="space-y-2 border-t border-gray-100 pt-3">
-            <h3 className="text-sm font-semibold">☁️ Bulut ({poolImages.length})</h3>
+          <div className="space-y-2 border-t border-divider pt-3">
+            <h3 className="text-sm font-medium text-ink">☁️ Bulut ({poolImages.length})</h3>
             {poolImages.length === 0 ? (
-              <p className="text-xs text-gray-400">Bulutda rasm yo&apos;q — &quot;Hammasini yuklash&quot; orqali qo&apos;shing.</p>
+              <p className="text-xs text-muted">Bulutda rasm yo&apos;q — &quot;Hammasini yuklash&quot; orqali qo&apos;shing.</p>
             ) : (
               <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
                 {poolImages.map((p) => (
-                  <div key={p.id} className="aspect-square overflow-hidden rounded border border-gray-200 bg-gray-100">
+                  <div key={p.id} className="aspect-square overflow-hidden rounded border border-divider bg-tag-neutral-bg">
                     {p.external_url && (
                       <AuthenticatedImage key={`${p.id}-${uploadVersion}`} src={p.external_url} alt="bulut" className="h-full w-full object-cover" />
                     )}
@@ -342,38 +402,40 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <h2 className="font-semibold mb-2">Master Problem List</h2>
-          {data.findings.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              Hali muammolar aniqlanmagan — Clinical Analysis Wizard (Phase 5-7) orqali to&apos;ldiriladi.
-            </p>
+        <div className="rounded-lg border border-divider bg-surface p-4">
+          <h2 className="mb-2 font-medium text-ink">Master Problem List</h2>
+          {answeredQuestions.length === 0 ? (
+            <p className="text-sm text-muted">Hali savollarga javob berilmagan — Clinical Analysis Wizard orqali to&apos;ldiriladi.</p>
           ) : (
             <ul className="space-y-2 text-sm">
-              {data.findings.map((f) => (
-                <li key={f.id} className="border-b border-gray-100 pb-2 last:border-0">
-                  <span className="font-medium">{f.category}:</span> {f.description}
-                  {!f.is_confirmed && (
-                    <span className="ml-2 inline-block rounded border border-gray-300 px-1.5 py-0.5 text-[10px] text-gray-500">
-                      Tasdiqlanmagan
-                    </span>
-                  )}
-                </li>
-              ))}
+              {answeredQuestions.map((q) => {
+                const finding = q.answer ? findingsByAnswerId.get(q.answer.id) : undefined;
+                return (
+                  <li key={q.template.id} className="border-b border-divider pb-2 last:border-0">
+                    <span className="font-medium text-ink">{q.template.category}:</span> {q.template.question} —{" "}
+                    {answerText(q.answer?.answer_value?.value)}
+                    {finding && (
+                      <span className="ml-2 inline-block rounded border border-status-other px-1.5 py-0.5 text-[10px] text-status-other">
+                        Muammo
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <h2 className="font-semibold mb-2">Tarix (Audit log)</h2>
+        <div className="rounded-lg border border-divider bg-surface p-4">
+          <h2 className="mb-2 font-medium text-ink">Tarix (Audit log)</h2>
           {data.audit_log.length === 0 ? (
-            <p className="text-sm text-gray-500">Hali harakat yo&apos;q</p>
+            <p className="text-sm text-muted">Hali harakat yo&apos;q</p>
           ) : (
             <ol className="space-y-2 text-sm">
               {data.audit_log.map((a, idx) => (
                 <li key={idx} className="flex gap-3">
-                  <span className="shrink-0 text-gray-400">{fmt(a.created_at)}</span>
-                  <span>
+                  <span className="shrink-0 text-muted">{fmt(a.created_at)}</span>
+                  <span className="text-body">
                     {a.action}
                     {a.details ? ` — ${JSON.stringify(a.details)}` : ""}
                   </span>
@@ -385,26 +447,23 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       </div>
 
       {poolPickerFor && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setPoolPickerFor(null)}
-        >
-          <div className="w-full max-w-lg rounded-lg bg-white p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPoolPickerFor(null)}>
+          <div className="w-full max-w-lg space-y-3 rounded-lg bg-surface p-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold">Bulutdan tanlang — {poolPickerType?.label}</h3>
-              <button onClick={() => setPoolPickerFor(null)} className="text-gray-400 hover:text-gray-600">
+              <h3 className="font-medium text-ink">Bulutdan tanlang — {poolPickerType?.label}</h3>
+              <button onClick={() => setPoolPickerFor(null)} className="text-muted hover:text-ink">
                 ✕
               </button>
             </div>
             {poolImages.length === 0 ? (
-              <p className="text-sm text-gray-500">Bulut bo&apos;sh</p>
+              <p className="text-sm text-muted">Bulut bo&apos;sh</p>
             ) : (
               <div className="grid grid-cols-4 gap-2">
                 {poolImages.map((p: ClinicalImageOut) => (
                   <button
                     key={p.id}
                     onClick={() => onAssignFromPool(poolPickerFor, p.id)}
-                    className="aspect-square overflow-hidden rounded border border-gray-200 bg-gray-100 hover:border-blue-400"
+                    className="aspect-square overflow-hidden rounded border border-divider bg-tag-neutral-bg hover:border-accent"
                   >
                     {p.external_url && <AuthenticatedImage src={p.external_url} alt="bulut" className="h-full w-full object-cover" />}
                   </button>

@@ -25,6 +25,7 @@ class CaseListItem(BaseModel):
     planner_name: str | None
     clinic_id: uuid.UUID | None = None
     clinic_name: str | None = None
+    face_photo_url: str | None = None
 
 
 class ImageTypeOut(BaseModel):
@@ -52,6 +53,7 @@ class FindingOut(BaseModel):
     description: str
     severity: str | None
     is_confirmed: bool
+    source_answer_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 

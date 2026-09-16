@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 /*
  * This app's UI is light-only (every component hardcodes bg-white /
@@ -11,11 +12,40 @@
   color-scheme: light;
 }
 
+/*
+ * Nocturne design system, retuned to the clinic's light/green theme (see
+ * the design handoff's README "Design Tokens" section). These become
+ * Tailwind utilities (bg-accent, text-muted, border-divider, ...) via
+ * Tailwind v4's @theme — no separate config file needed.
+ */
 @theme inline {
-  --font-sans: var(--font-geist-sans);
+  --font-sans: "Inter", var(--font-geist-sans), system-ui, sans-serif;
+  --font-heading: "Inter", var(--font-geist-sans), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
+
+  --color-accent: #2f8f5c;
+  --color-accent-hover: #267a4d;
+  --color-accent-active: #1f6640;
+  --color-surface: #ffffff;
+  --color-ink: #16241c;
+  --color-muted: #6b7a72;
+  --color-body: #3a4a40;
+  --color-divider: rgba(22, 36, 28, 0.12);
+
+  --color-tag-neutral-bg: #eef1ec;
+  --color-tag-neutral-text: #3a4a40;
+  --color-tag-accent-bg: #e3f5ea;
+  --color-tag-accent-text: #1c4331;
+
+  --color-status-ready: #15803d;
+  --color-status-ready-bg: #e6f7ea;
+  --color-status-new: #6b7280;
+  --color-status-new-bg: #f1f2f0;
+  --color-status-other: #b91c1c;
+  --color-status-other-bg: #fdecec;
 }
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
 }

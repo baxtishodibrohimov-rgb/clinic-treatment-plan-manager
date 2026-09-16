@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { api, ApiError } from "@/lib/api";
 import type { AssignmentConfigOut, SyncLogOut } from "@/lib/types";
@@ -48,9 +49,10 @@ export default function SettingsPage() {
   return (
     <Shell>
       <div className="space-y-6">
+        <Link href="/admin/settings-hub" className="text-sm text-accent hover:underline">← Sozlamalar</Link>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Sozlamalar</h1>
+            <h1 className="text-2xl font-bold">Tizim sozlamalari</h1>
             <p className="text-sm text-gray-500">
               Cliniccards API kaliti va Telegram token bu yerda emas — ular faqat backend environment
               o&apos;zgaruvchisi sifatida saqlanadi.
