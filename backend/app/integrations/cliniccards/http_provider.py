@@ -99,8 +99,25 @@ class HttpCliniccardsAdapter(CliniccardsAdapter):
         return _map_patient(raw) if isinstance(raw, dict) else None
 
     async def get_appointments(self, params: GetAppointmentsParams | None = None) -> list[CliniccardsAppointment]:
-        now = datetime.now(timezone.utc); start = params.from_ if params and params.from_ else now - timedelta(days=self._settings.cliniccards_sync_days_back); end = params.to if params and params.to else now + timedelta(days=self._settings.cliniccards_sync_days_ahead)
-        return [_map_appointment(row) for row in _as_list(await self._get(self._settings.cliniccards_appointments_path, {"from":start.date().isoformat(), "to":end.date().isoformat()}))]
+        now = datetime.now(timezone.utc)
+        if params and params.patient_id:
+            # Pulling one patient's full visit history (to work out visit
+            # order), not the periodic sync's narrow recent window.
+            start = params.from_ or now - timedelta(days=self._settings.cliniccards_history_days_back)
+            end = params.to or now
+        else:
+            start = params.from_ if params and params.from_ else now - timedelta(days=self._settings.cliniccards_sync_days_back)
+            end = params.to if params and params.to else now + timedelta(days=self._settings.cliniccards_sync_days_ahead)
+        query: dict[str, Any] = {"from": start.date().isoformat(), "to": end.date().isoformat()}
+        if params and params.patient_id:
+            query["patient_id"] = params.patient_id
+        rows = _as_list(await self._get(self._settings.cliniccards_appointments_path, query))
+        appts = [_map_appointment(row) for row in rows]
+        # Filter client-side too, in case the API ignores an unrecognized
+        # patient_id param and just returns everything in the date range.
+        if params and params.patient_id:
+            appts = [a for a in appts if a.patient_id == params.patient_id]
+        return appts
 
     async def get_appointment_type(self, appointment_id: str) -> dict | None: return None
     async def get_patient_documents(self, patient_id: str) -> list[CliniccardsDocument]: return []

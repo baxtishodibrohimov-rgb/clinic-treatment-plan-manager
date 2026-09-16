@@ -64,3 +64,7 @@ class GetAppointmentsParams:
     from_: datetime | None = None
     to: datetime | None = None
     appointment_type_code: str | None = None
+    # When set, restricts to one patient's visits — used to pull a patient's
+    # full history (see cliniccards_history_days_back) rather than just the
+    # narrow recent window the periodic sync otherwise asks for.
+    patient_id: str | None = None

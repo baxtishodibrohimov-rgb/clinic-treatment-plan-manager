@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     cliniccards_file_path: str = "/file"
     cliniccards_sync_days_back: int = 1
     cliniccards_sync_days_ahead: int = 60
+    # How far back to look when pulling one patient's full visit history to
+    # determine whether a given appointment is their 2nd visit ever (the
+    # clinic's most important sync rule) — must cover a patient's whole
+    # history, not just the narrow window above used to spot new bookings.
+    cliniccards_history_days_back: int = 3650
     cliniccards_webhook_secret: str | None = None
 
     # Telegram

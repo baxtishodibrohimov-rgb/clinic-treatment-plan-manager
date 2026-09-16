@@ -3,7 +3,6 @@
 Shared between the periodic Celery poll, the webhook endpoint, and the
 "Sync now" admin action, so all three paths create/update cases identically.
 """
-import re
 import uuid
 from datetime import datetime, timezone
 
@@ -11,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.integrations.cliniccards.base import CliniccardsAdapter
-from app.integrations.cliniccards.types import CliniccardsAppointment
+from app.integrations.cliniccards.types import CliniccardsAppointment, GetAppointmentsParams
 from app.models.clinic import Clinic
 from app.models.enums import SyncStatus, SyncType
 from app.models.sync_log import IntegrationSyncLog
@@ -25,12 +24,14 @@ from app.services.case_service import ensure_case, import_images, upsert_appoint
 BRANCH_FIELD_CANDIDATES = ("branchCode", "branch_code", "branch", "clinicCode", "clinic_code", "location", "filialCode", "filial")
 
 
-def is_second_consultation(appt: CliniccardsAppointment) -> bool:
-    """Cliniccards has no visit-type field; the clinic marks second consults
-    at the beginning of the visit note. Accept the observed spellings and
-    the clinic's short form (a leading 2 followed by text)."""
-    note = re.sub(r"\s+", " ", (appt.note or "").strip().casefold())
-    return note.startswith(("2and cons", "2nd cons", "2 and cons")) or bool(re.match(r"^2\D", note))
+async def is_second_visit(adapter: CliniccardsAdapter, appt: CliniccardsAppointment) -> bool:
+    """The clinic's most important sync rule: a case is only opened once
+    this appointment is exactly the patient's 2nd visit in their whole
+    Cliniccards visit history — not a label or note on the appointment
+    itself, which Cliniccards doesn't reliably provide."""
+    history = await adapter.get_appointments(GetAppointmentsParams(patient_id=appt.patient_id))
+    visits = sorted(history, key=lambda a: (a.scheduled_at, a.appointment_id))
+    return len(visits) >= 2 and visits[1].appointment_id == appt.appointment_id
 
 
 def resolve_clinic_for_appointment(db: Session, appt: CliniccardsAppointment) -> uuid.UUID | None:
@@ -75,7 +76,11 @@ async def sync_second_consultations(
         appts = await adapter.get_appointments()
         if only_appointment_id:
             appts = [a for a in appts if a.appointment_id == only_appointment_id]
-        appts = [a for a in appts if is_second_consultation(a)]
+        second_visits = []
+        for a in appts:
+            if await is_second_visit(adapter, a):
+                second_visits.append(a)
+        appts = second_visits
         records_seen = len(appts)
 
         for appt in appts:
