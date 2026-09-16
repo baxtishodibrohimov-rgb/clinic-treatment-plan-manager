@@ -251,7 +251,10 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const selectedDayCount = dailyCounts.find((item) => item.date === selectedDate)?.count ?? 0;
+  const selectedCases = cases.filter(
+    (item) => item.consultation_datetime && toLocalDateValue(new Date(item.consultation_datetime)) === selectedDate,
+  );
+  const selectedDayCount = selectedCases.length;
   const busyDays = dailyCounts.filter((item) => item.count > 0);
 
   const statCards = stats
@@ -332,6 +335,38 @@ export default function DashboardPage() {
               </button>
             ))}
             {!loading && busyDays.length === 0 && <p className="text-xs text-gray-400">Keyingi 60 kunda konsultatsiya topilmadi</p>}
+          </div>
+
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <h3 className="mb-2 text-sm font-semibold">Tanlangan sanadagi konsultatsiyalar</h3>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {selectedCases.map((item) => (
+                <Link
+                  key={item.id}
+                  href={`/cases/${item.id}`}
+                  className="rounded-md border border-gray-200 p-3 transition-colors hover:border-blue-400 hover:bg-blue-50/40"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-sm font-medium">{item.patient_name}</div>
+                    <div className="text-xs font-semibold text-blue-700">
+                      {item.consultation_datetime
+                        ? new Date(item.consultation_datetime).toLocaleTimeString("uz-UZ", { hour: "2-digit", minute: "2-digit" })
+                        : "—"}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {STATUS_COLUMNS.find((column) => column.status === item.status)?.label ?? item.status}
+                  </div>
+                  <div className="text-xs text-gray-500">Doktor: {item.doctor_name ?? "—"}</div>
+                  <div className="text-xs text-gray-500">Planner: {item.planner_name ?? "biriktirilmagan"}</div>
+                </Link>
+              ))}
+              {!loading && selectedCases.length === 0 && (
+                <div className="rounded-md border border-dashed border-gray-200 p-4 text-sm text-gray-400 sm:col-span-2 lg:col-span-3">
+                  Bu sanada 2-konsultatsiya yo‘q.
+                </div>
+              )}
+            </div>
           </div>
         </section>
 
