@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.analysis import AnalysisTemplate
 from app.models.case import TreatmentPlanCase
 from app.models.dental import ToothStatus
 from app.models.image import ImageType
@@ -19,7 +20,7 @@ from app.schemas.analysis import (
     ToothStatusOut,
 )
 from app.security.deps import get_current_user
-from app.services import analysis_service
+from app.services import analysis_service, findings_service
 from app.services.analysis_service import tooth_code
 
 router = APIRouter(prefix="/api/cases/{case_id}", tags=["analysis"])
@@ -86,6 +87,9 @@ def upsert_analysis_answer(
 ) -> AnalysisAnswerOut:
     _get_case_or_404(db, case_id, user)
     answer = analysis_service.save_answer(db, case_id, template_id, value=payload.value, note=payload.note, user_id=user.id)
+    template = db.get(AnalysisTemplate, template_id)
+    if template:
+        findings_service.sync_finding_for_answer(db, case_id, template, answer)
     db.commit()
     db.refresh(answer)
     return AnalysisAnswerOut.model_validate(answer)
