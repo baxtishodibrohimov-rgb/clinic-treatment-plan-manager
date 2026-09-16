@@ -46,14 +46,14 @@ function QuestionField({ q, onSave }: { q: AnalysisQuestionOut; onSave: (templat
 
   if (q.template.answer_type === "single_choice") {
     return (
-      <div className="space-y-1.5">
-        <label className="block text-sm font-medium text-gray-700">{q.template.question}</label>
-        <div className="flex flex-wrap gap-1.5">
+      <div className="space-y-2">
+        <label className="block text-base font-medium text-gray-800">{q.template.question}</label>
+        <div className="flex flex-wrap gap-2">
           {q.template.options.map((opt) => (
             <button
               key={opt}
               onClick={() => onSave(q.template.id, opt)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
                 currentValue === opt ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-300 text-gray-600 hover:bg-gray-50"
               }`}
             >
@@ -67,9 +67,9 @@ function QuestionField({ q, onSave }: { q: AnalysisQuestionOut; onSave: (templat
 
   if (q.template.answer_type === "boolean") {
     return (
-      <div className="space-y-1.5">
-        <label className="block text-sm font-medium text-gray-700">{q.template.question}</label>
-        <div className="flex gap-1.5">
+      <div className="space-y-2">
+        <label className="block text-base font-medium text-gray-800">{q.template.question}</label>
+        <div className="flex gap-2">
           {[
             { label: "Ha", val: true },
             { label: "Yo'q", val: false },
@@ -77,7 +77,7 @@ function QuestionField({ q, onSave }: { q: AnalysisQuestionOut; onSave: (templat
             <button
               key={opt.label}
               onClick={() => onSave(q.template.id, opt.val)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
                 currentValue === opt.val ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-300 text-gray-600 hover:bg-gray-50"
               }`}
             >
@@ -91,14 +91,14 @@ function QuestionField({ q, onSave }: { q: AnalysisQuestionOut; onSave: (templat
 
   // text
   return (
-    <div className="space-y-1.5">
-      <label className="block text-sm font-medium text-gray-700">{q.template.question}</label>
+    <div className="space-y-2">
+      <label className="block text-base font-medium text-gray-800">{q.template.question}</label>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onBlur={() => { if (text !== currentValue) onSave(q.template.id, text); }}
         rows={2}
-        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+        className="w-full max-w-xl rounded-md border border-gray-300 px-3 py-2 text-sm"
       />
     </div>
   );
@@ -112,6 +112,7 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
+  const [questionIndex, setQuestionIndex] = useState(0);
 
   const load = async () => {
     const [q, c, cd] = await Promise.all([
@@ -182,14 +183,43 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
     if (!questionsByTypeCode.has(code)) questionsByTypeCode.set(code, []);
     questionsByTypeCode.get(code)!.push(q);
   }
+  const sortedQuestionsFor = (code: string) =>
+    (questionsByTypeCode.get(code) ?? []).slice().sort((a, b) => a.template.sort_order - b.template.sort_order);
 
   const currentCode = WIZARD_ORDER[stepIndex];
   const currentType = imageTypeByCode.get(currentCode);
   const currentImage = currentType ? imageByTypeId.get(currentType.id) : null;
-  const currentQuestions = (questionsByTypeCode.get(currentCode) ?? []).sort((a, b) => a.template.sort_order - b.template.sort_order);
-  const isFirst = stepIndex === 0;
-  const isLast = stepIndex === WIZARD_ORDER.length - 1;
+  const currentQuestions = sortedQuestionsFor(currentCode);
+  const currentQuestion = currentQuestions[questionIndex] ?? null;
   const dentalChartJaw = DENTAL_CHART_JAW_BY_CODE[currentCode];
+
+  const isVeryFirst = stepIndex === 0 && questionIndex === 0;
+  const isVeryLast = stepIndex === WIZARD_ORDER.length - 1 && questionIndex >= currentQuestions.length - 1;
+
+  const goNext = () => {
+    if (questionIndex < currentQuestions.length - 1) {
+      setQuestionIndex((i) => i + 1);
+    } else if (stepIndex < WIZARD_ORDER.length - 1) {
+      setStepIndex((s) => s + 1);
+      setQuestionIndex(0);
+    }
+  };
+
+  const goBack = () => {
+    if (questionIndex > 0) {
+      setQuestionIndex((i) => i - 1);
+    } else if (stepIndex > 0) {
+      const prevCode = WIZARD_ORDER[stepIndex - 1];
+      const prevCount = sortedQuestionsFor(prevCode).length;
+      setStepIndex((s) => s - 1);
+      setQuestionIndex(Math.max(prevCount - 1, 0));
+    }
+  };
+
+  const goToStep = (idx: number) => {
+    setStepIndex(idx);
+    setQuestionIndex(0);
+  };
 
   return (
     <Shell>
@@ -200,7 +230,10 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
           </Link>
           <div>
             <h1 className="text-2xl font-bold">Clinical Analysis Wizard</h1>
-            <p className="text-sm text-gray-500">Bosqich {stepIndex + 1} / {WIZARD_ORDER.length}</p>
+            <p className="text-sm text-gray-500">
+              Bosqich {stepIndex + 1} / {WIZARD_ORDER.length}
+              {currentQuestions.length > 0 && ` — Savol ${questionIndex + 1} / ${currentQuestions.length}`}
+            </p>
           </div>
         </div>
 
@@ -213,7 +246,7 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
             return (
               <button
                 key={code}
-                onClick={() => setStepIndex(idx)}
+                onClick={() => goToStep(idx)}
                 title={t?.label ?? code}
                 className={`flex h-7 min-w-7 items-center justify-center rounded border px-1.5 text-xs font-medium ${
                   idx === stepIndex
@@ -229,59 +262,59 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
           })}
         </div>
 
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <h2 className="font-semibold">{currentType?.label ?? currentCode}</h2>
-            {currentType && (
-              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">{currentType.category}</span>
-            )}
-          </div>
-
-          {!currentType ? (
+        {!currentType ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
             <p className="text-sm text-gray-500">
               Bu rasm turi (&quot;{currentCode}&quot;) hali sozlanmagan — migratsiya to&apos;liq qo&apos;llanilmagan bo&apos;lishi mumkin.
             </p>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-[280px_1fr]">
-              <div className="flex aspect-square items-center justify-center overflow-hidden rounded bg-gray-100">
+          </div>
+        ) : (
+          <>
+            <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-1">
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold">{currentType.label}</h2>
+                <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600">{currentType.category}</span>
+              </div>
+              <div className="flex h-[58vh] w-full items-center justify-center overflow-hidden rounded bg-gray-100">
                 {currentImage && currentImage.external_url ? (
                   <AuthenticatedImage src={currentImage.external_url} alt={currentType.label} className="h-full w-full object-contain" />
                 ) : (
-                  <span className="text-xs text-gray-400">Rasm hali yuklanmagan</span>
+                  <span className="text-sm text-gray-400">Rasm hali yuklanmagan</span>
                 )}
               </div>
-              <div className="space-y-4">
-                {!currentImage && (
-                  <p className="text-sm text-gray-500">
-                    Bu rasm hali case sahifasida yuklanmagan. Savollarga baribir javob berishingiz mumkin, lekin avval rasmni yuklashni tavsiya qilamiz.
-                  </p>
-                )}
-                {currentQuestions.length === 0 ? (
-                  <p className="text-sm text-gray-500">Bu rasm uchun savol kiritilmagan.</p>
-                ) : (
-                  currentQuestions.map((q) => <QuestionField key={q.template.id} q={q} onSave={saveAnswer} />)
-                )}
-              </div>
+              {!currentImage && (
+                <p className="pt-1 text-sm text-gray-500">
+                  Bu rasm hali case sahifasida yuklanmagan. Savollarga baribir javob berishingiz mumkin, lekin avval rasmni yuklashni tavsiya qilamiz.
+                </p>
+              )}
             </div>
-          )}
-        </div>
 
-        {dentalChartJaw && chart && (
-          <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-            <h2 className="font-semibold">Tish jadvali (FDI) — {dentalChartJaw === "upper" ? "yuqori jag'" : "pastki jag'"}</h2>
-            <DentalChart chart={chart} onClick={clickTooth} onReset={resetChart} jaw={dentalChartJaw} showReset={dentalChartJaw === "upper"} />
-          </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-6">
+              {currentQuestion ? (
+                <QuestionField q={currentQuestion} onSave={saveAnswer} />
+              ) : (
+                <p className="text-sm text-gray-500">Bu rasm uchun savol kiritilmagan.</p>
+              )}
+            </div>
+
+            {dentalChartJaw && chart && (
+              <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                <h2 className="font-semibold">Tish jadvali (FDI) — {dentalChartJaw === "upper" ? "yuqori jag'" : "pastki jag'"}</h2>
+                <DentalChart chart={chart} onClick={clickTooth} onReset={resetChart} jaw={dentalChartJaw} showReset={dentalChartJaw === "upper"} />
+              </div>
+            )}
+          </>
         )}
 
         <div className="flex justify-between">
           <button
-            disabled={isFirst}
-            onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
+            disabled={isVeryFirst}
+            onClick={goBack}
             className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium disabled:opacity-40 hover:bg-gray-50"
           >
             ← Orqaga
           </button>
-          {isLast ? (
+          {isVeryLast ? (
             <Link
               href={`/cases/${id}`}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -290,7 +323,7 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
             </Link>
           ) : (
             <button
-              onClick={() => setStepIndex((i) => Math.min(WIZARD_ORDER.length - 1, i + 1))}
+              onClick={goNext}
               className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
             >
               Keyingisi →
