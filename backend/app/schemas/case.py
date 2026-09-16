@@ -86,6 +86,23 @@ class AssignCaseRequest(BaseModel):
     note: str | None = None
 
 
+class ManualCaseCreateRequest(BaseModel):
+    full_name: str
+    birth_date: date | None = None
+    phone: str | None = None
+    doctor_name: str | None = None
+    consultation_datetime: datetime
+    priority: Priority = Priority.NORMAL
+    # Required only for SUPER_ADMIN (who has no clinic of their own);
+    # non-super-admins are always locked to their own clinic.
+    clinic_id: uuid.UUID | None = None
+
+
+class DoctorOut(BaseModel):
+    id: uuid.UUID
+    full_name: str
+
+
 class ReviewRequest(BaseModel):
     plan_version_id: uuid.UUID | None = None
     decision: str  # "approve" | "revision_required"

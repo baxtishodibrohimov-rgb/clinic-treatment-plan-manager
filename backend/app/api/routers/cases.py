@@ -13,7 +13,7 @@ from app.models.enums import CaseStatus, ReviewDecision, Role
 from app.models.image import ClinicalImage, ImageType
 from app.models.finding import Finding
 from app.models.audit import AuditLog
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.case import (
     AssignCaseRequest,
     AuditLogOut,
@@ -21,13 +21,15 @@ from app.schemas.case import (
     CaseListItem,
     ClinicalImageOut,
     DashboardStats,
+    DoctorOut,
     FindingOut,
     ImageTypeOut,
+    ManualCaseCreateRequest,
     PatientSummary,
     ReviewRequest,
 )
 from app.security.deps import clinic_scope, get_current_user, require_admin, require_role
-from app.services.case_service import assign_case, submit_review
+from app.services.case_service import assign_case, create_manual_case, submit_review
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -98,6 +100,66 @@ def dashboard_stats(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | 
         review_pending=sum(1 for c in cases if c.status == CaseStatus.REVIEW_REQUIRED),
         ready=sum(1 for c in cases if c.status == CaseStatus.READY),
         overdue=sum(1 for c in cases if c.status == CaseStatus.OVERDUE),
+    )
+
+
+@router.get("/doctors", response_model=list[DoctorOut], dependencies=[Depends(get_current_user)])
+def list_doctors(db: Session = Depends(get_db), scope_clinic_id: uuid.UUID | None = Depends(clinic_scope)) -> list[DoctorOut]:
+    """Roster for the manual case-entry form's doctor picker."""
+    query = (
+        select(User)
+        .join(UserRole, UserRole.user_id == User.id)
+        .where(UserRole.role == Role.DOCTOR, User.is_active.is_(True))
+        .order_by(User.full_name)
+    )
+    if scope_clinic_id is not None:
+        query = query.where(User.clinic_id == scope_clinic_id)
+    doctors = db.execute(query).scalars().unique().all()
+    return [DoctorOut(id=d.id, full_name=d.full_name) for d in doctors]
+
+
+@router.post("/manual", response_model=CaseListItem, status_code=status.HTTP_201_CREATED)
+def create_manual_case_endpoint(
+    payload: ManualCaseCreateRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> CaseListItem:
+    """Cliniccards isn't connected yet — this lets staff register a real
+    patient/case directly until it is (spec: manual data entry fallback)."""
+    if user.is_super_admin:
+        if payload.clinic_id is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "clinic_id majburiy")
+        clinic_id = payload.clinic_id
+    else:
+        clinic_id = user.clinic_id
+        if clinic_id is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sizga hech qanday klinika biriktirilmagan")
+
+    case = create_manual_case(
+        db,
+        full_name=payload.full_name,
+        birth_date=payload.birth_date,
+        phone=payload.phone,
+        doctor_name=payload.doctor_name,
+        consultation_datetime=payload.consultation_datetime,
+        clinic_id=clinic_id,
+        priority=payload.priority,
+    )
+    db.commit()
+    db.refresh(case)
+
+    clinic_name = db.get(Clinic, clinic_id).name if clinic_id else None
+    planner_name = db.get(User, case.responsible_planner_user_id).full_name if case.responsible_planner_user_id else None
+    return CaseListItem(
+        id=case.id,
+        status=case.status,
+        priority=case.priority,
+        consultation_datetime=case.consultation_datetime,
+        deadline=case.deadline,
+        images_progress_percent=case.images_progress_percent,
+        patient_name=payload.full_name,
+        doctor_name=case.primary_doctor_name,
+        planner_name=planner_name,
+        clinic_id=clinic_id,
+        clinic_name=clinic_name,
     )
 
 

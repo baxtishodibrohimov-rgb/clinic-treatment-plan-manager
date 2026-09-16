@@ -106,6 +106,20 @@ show what that field is actually called. A database migration
 auto-created "Bosh klinika" clinic, so upgrading an already-deployed
 single-clinic instance doesn't lose data.
 
+**Manual case entry (Cliniccards not connected yet).** `POST
+/api/cases/manual` and the dashboard's "+ Yangi bemor" button let staff
+register a real patient/case by hand — full name, birth date, phone,
+doctor (picked from the clinic's own DOCTOR-role users via the new `GET
+/api/cases/doctors`), consultation datetime, priority. It synthesizes a
+"MANUAL-..." patient/appointment id and calls the exact same
+`ensure_case` pipeline a real Cliniccards sync uses (state machine,
+deadline calc, auto-assignment), tagged `source: "manual"` in the audit
+log instead of `"cliniccards"` — so once Cliniccards is connected, synced
+and manually-entered cases behave identically. Verified end-to-end
+(curl as a non-admin planner, then a full browser run of the dashboard
+modal) that a manually-created case shows up correctly scoped to the
+creator's clinic.
+
 **Phase 5 — Clinical Analysis Wizard (og'iz ichi + profil).** The
 questionnaire (33 questions across intraoral-frontal, intraoral-buccal
 left/right, and 5 extraoral/profile photo types) was dictated by the

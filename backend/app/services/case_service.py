@@ -131,7 +131,9 @@ def resolve_internal_doctor(db: Session, doctor_name: str | None, clinic_id: uui
     return db.execute(query).scalars().first()
 
 
-def ensure_case(db: Session, appt: CliniccardsAppointment, clinic_id: uuid.UUID | None) -> tuple[TreatmentPlanCase, bool]:
+def ensure_case(
+    db: Session, appt: CliniccardsAppointment, clinic_id: uuid.UUID | None, *, source: str = "cliniccards"
+) -> tuple[TreatmentPlanCase, bool]:
     """Idempotent case creation (spec section 3): a unique constraint on
     cliniccards_appointment_id guarantees one appointment never produces two
     cases, even under concurrent sync runs.
@@ -177,7 +179,7 @@ def ensure_case(db: Session, appt: CliniccardsAppointment, clinic_id: uuid.UUID 
         db,
         case_id=case.id,
         action="case_created",
-        details={"source": "cliniccards", "cliniccards_appointment_id": appt.appointment_id},
+        details={"source": source, "cliniccards_appointment_id": appt.appointment_id},
     )
 
     from app.services.assignment import auto_assign_planner  # local import: avoid circular import
@@ -187,6 +189,54 @@ def ensure_case(db: Session, appt: CliniccardsAppointment, clinic_id: uuid.UUID 
         set_case_status(db, case, CaseStatus.WAITING_ASSIGNMENT)
 
     return case, True
+
+
+def create_manual_case(
+    db: Session,
+    *,
+    full_name: str,
+    birth_date,
+    phone: str | None,
+    doctor_name: str | None,
+    consultation_datetime: datetime,
+    clinic_id: uuid.UUID,
+    priority=None,
+) -> TreatmentPlanCase:
+    """Manual data entry (spec: Cliniccards not connected yet, staff needs
+    to register real patients directly). Synthesizes a "MANUAL-..." patient
+    id and appointment id so this reuses the exact same
+    CliniccardsPatientCache/CliniccardsAppointmentCache/ensure_case pipeline
+    as a real Cliniccards sync — nothing about downstream case handling
+    (state machine, assignment, deadlines) has a separate code path to
+    maintain for manually-entered cases."""
+    patient_id = f"MANUAL-{uuid.uuid4()}"
+    now = datetime.now(timezone.utc)
+    db.add(
+        CliniccardsPatientCache(
+            cliniccards_patient_id=patient_id,
+            full_name=full_name,
+            birth_date=birth_date,
+            phone=phone,
+            raw_payload={"manual": True},
+            synced_at=now,
+        )
+    )
+    db.flush()
+
+    appt = CliniccardsAppointment(
+        appointment_id=f"MANUAL-{uuid.uuid4()}",
+        patient_id=patient_id,
+        doctor_name=doctor_name,
+        appointment_type_code="manual",
+        appointment_type_label="Qo'lda kiritilgan",
+        scheduled_at=consultation_datetime,
+        raw={"manual": True},
+    )
+    upsert_appointment_cache(db, appt)
+    case, _ = ensure_case(db, appt, clinic_id, source="manual")
+    if priority is not None:
+        case.priority = priority
+    return case
 
 
 async def import_images(db: Session, adapter: CliniccardsAdapter, case: TreatmentPlanCase, patient_id: str) -> None:

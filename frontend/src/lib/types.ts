@@ -45,6 +45,11 @@ export interface CaseListItem {
   clinic_name: string | null;
 }
 
+export interface DoctorOut {
+  id: string;
+  full_name: string;
+}
+
 export interface DashboardStats {
   today_consultations: number;
   new_cases: number;
