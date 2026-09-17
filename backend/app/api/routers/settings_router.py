@@ -12,9 +12,11 @@ from app.schemas.config import (
     AppSettingUpdate,
     AssignmentConfigOut,
     AssignmentConfigUpdate,
+    ResetPatientDataRequest,
     SyncLogOut,
 )
-from app.security.deps import require_admin
+from app.security.deps import require_admin, require_super_admin
+from app.services.reset_service import RESET_CONFIRM_PHRASE, reset_patient_data
 from app.services.sync_service import sync_second_consultations
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_admin)])
@@ -71,3 +73,19 @@ def sync_log(db: Session = Depends(get_db)) -> list[SyncLogOut]:
 async def sync_now(db: Session = Depends(get_db)) -> dict:
     adapter = get_cliniccards_adapter()
     return await sync_second_consultations(db, adapter, SyncType.MANUAL)
+
+
+@router.post("/reset-patient-data", dependencies=[Depends(require_super_admin)])
+def reset_patient_data_endpoint(payload: ResetPatientDataRequest, db: Session = Depends(get_db)) -> dict:
+    """Danger zone: wipes every case/patient/image/finding/etc. so the
+    clinic can start clean and re-pull everything from Cliniccards. Gated
+    behind SUPER_ADMIN (stricter than this router's own require_admin) plus
+    a typed confirmation phrase, since this is irreversible."""
+    if payload.confirm_phrase.strip() != RESET_CONFIRM_PHRASE:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Tasdiqlash matni noto'g'ri. Aniq shu matnni yozing: \"{RESET_CONFIRM_PHRASE}\"",
+        )
+    reset_patient_data(db)
+    db.commit()
+    return {"status": "ok"}

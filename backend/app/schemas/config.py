@@ -82,3 +82,10 @@ class SyncLogOut(BaseModel):
     error: str | None
 
     model_config = {"from_attributes": True}
+
+
+class ResetPatientDataRequest(BaseModel):
+    # Requiring the operator to type this out (checked server-side against
+    # RESET_CONFIRM_PHRASE) is the only guard against an accidental click on
+    # an otherwise-irreversible, whole-database wipe.
+    confirm_phrase: str

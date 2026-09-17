@@ -4,9 +4,66 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { api, ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import type { AssignmentConfigOut, SyncLogOut } from "@/lib/types";
 
+const RESET_CONFIRM_PHRASE = "HAMMASINI TOZALA";
+
+function DangerZone() {
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const reset = async () => {
+    if (confirmText !== RESET_CONFIRM_PHRASE) return;
+    if (!window.confirm("Haqiqatan ham BARCHA bemor/case ma'lumotlarini butunlay o'chirmoqchimisiz? Bu amalni ORQAGA QAYTARIB BO'LMAYDI.")) {
+      return;
+    }
+    setBusy(true);
+    setResult(null);
+    try {
+      await api.post("/api/settings/reset-patient-data", { confirm_phrase: confirmText });
+      setResult("Barcha bemor/case ma'lumotlari o'chirildi. Cliniccardsdan qaytadan sync qiling.");
+      setConfirmText("");
+    } catch (e) {
+      setResult(e instanceof ApiError ? e.message : "Xatolik");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border-2 border-status-other bg-status-other-bg p-4 space-y-3">
+      <h2 className="font-semibold text-status-other">Xavfli zona</h2>
+      <p className="text-sm text-status-other">
+        Barcha case&apos;lar, bemorlar, rasmlar, tahlil javoblari, muammolar ro&apos;yxati va tarix butunlay
+        o&apos;chiriladi. Xodimlar, klinikalar, rasm turlari va savolnoma saqlanib qoladi. Bu amalni ORQAGA
+        QAYTARIB BO&apos;LMAYDI.
+      </p>
+      {result && <div className="rounded-md bg-white px-3 py-2 text-sm text-status-other">{result}</div>}
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-status-other">
+          Davom etish uchun aniq shu matnni yozing: <span className="font-mono">{RESET_CONFIRM_PHRASE}</span>
+        </label>
+        <input
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          className="w-full max-w-sm rounded-md border border-status-other px-3 py-2 text-sm"
+        />
+      </div>
+      <button
+        onClick={reset}
+        disabled={busy || confirmText !== RESET_CONFIRM_PHRASE}
+        className="rounded-md bg-status-other px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+      >
+        {busy ? "..." : "Barcha bemor ma'lumotlarini o'chirish"}
+      </button>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
+  const { isSuperAdmin } = useAuth();
   const [config, setConfig] = useState<AssignmentConfigOut | null>(null);
   const [log, setLog] = useState<SyncLogOut[]>([]);
   const [syncing, setSyncing] = useState(false);
@@ -131,6 +188,8 @@ export default function SettingsPage() {
             </tbody>
           </table>
         </div>
+
+        {isSuperAdmin && <DangerZone />}
       </div>
     </Shell>
   );
