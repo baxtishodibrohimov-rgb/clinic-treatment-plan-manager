@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str | None = None
 
+    # Automatic image-type recognition (see app/integrations/image_classifier.py).
+    # Get a free key at https://aistudio.google.com/apikey — this is a
+    # separate developer API key, not the same thing as a personal Gemini
+    # app/Google One subscription. Leave unset and every upload just keeps
+    # landing in the "bulut" pool for manual sorting, exactly like today.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.0-flash"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

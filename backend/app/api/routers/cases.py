@@ -37,6 +37,7 @@ from app.security.deps import clinic_scope, get_current_user, require_admin, req
 from app.services.case_service import (
     assign_case,
     assign_pool_image_to_slot,
+    auto_classify_pool_images,
     create_case_from_cliniccards_patient,
     create_manual_case,
     save_uploaded_image,
@@ -386,12 +387,16 @@ async def _read_upload(file: UploadFile) -> tuple[str, str, bytes]:
 async def bulk_upload_case_images(
     case_id: uuid.UUID, files: list[UploadFile] = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> CaseDetail:
-    """"Hammasini yuklash" — there is no image classifier, so files land in
-    the case's "bulut" (image_type_id=NULL) instead of being guessed into a
-    slot. Staff assign each one to the right slot via assign-from-pool."""
+    """"Hammasini yuklash" — files land in the case's "bulut"
+    (image_type_id=NULL), then auto_classify_pool_images tries to place
+    each one straight into its slot automatically (see
+    app/integrations/image_classifier.py). Anything it can't confidently
+    place — or everything, if GEMINI_API_KEY isn't configured — stays in
+    the bulut for staff to assign by hand via assign-from-pool."""
     case = _get_case_or_404(db, case_id, user)
     read_files = [await _read_upload(f) for f in files]
-    upload_to_pool(db, case, read_files)
+    images = upload_to_pool(db, case, read_files)
+    await auto_classify_pool_images(db, case, images)
     db.commit()
     return get_case(case_id, db, user)
 

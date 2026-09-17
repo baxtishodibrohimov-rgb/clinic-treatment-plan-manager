@@ -145,18 +145,41 @@ and manually-entered cases behave identically. Verified end-to-end
 modal) that a manually-created case shows up correctly scoped to the
 creator's clinic.
 
-**"Bulut" (pool) image upload.** "Hammasini yuklash" no longer guesses
-which slot an uploaded file belongs to (there's still no classifier) — files
-land in the case's pool (`ClinicalImage.image_type_id = NULL`) via
-`upload_to_pool`. Each required-image slot has two controls: **+** uploads
+**"Bulut" (pool) image upload.** "Hammasini yuklash" lands every uploaded
+file in the case's pool first (`ClinicalImage.image_type_id = NULL`) via
+`upload_to_pool`, then `auto_classify_pool_images` tries to place each one
+straight into its slot automatically — see "Automatic image recognition"
+below. Each required-image slot also has two manual controls: **+** uploads
 straight into that slot (unchanged old behavior), **☁️** opens a picker to
 assign one of the pooled images instead. Assigning a pool image into an
 already-filled slot moves the previous occupant back into the pool rather
 than discarding it (`assign_pool_image_to_slot` /
-`POST /api/cases/{id}/images/{image_type_id}/assign-from-pool`). Verified
-end-to-end with real HTTP calls: bulk upload → pool, assign into a slot,
-assign a second image into the same slot → first one reappears in the pool,
-and re-picking an image already assigned elsewhere correctly 400s.
+`POST /api/cases/{id}/images/{image_type_id}/assign-from-pool`) — the same
+non-destructive swap the automatic path uses. Verified end-to-end with real
+HTTP calls: bulk upload → pool, assign into a slot, assign a second image
+into the same slot → first one reappears in the pool, and re-picking an
+image already assigned elsewhere correctly 400s.
+
+**Automatic image recognition.** `GEMINI_API_KEY` (optional — get a free
+one at aistudio.google.com/apikey) turns on `auto_classify_pool_images`
+(`backend/app/integrations/image_classifier.py`): each freshly-uploaded
+bulut image is sent to Gemini's vision API along with the clinic's own
+`image_types` catalog (never an invented list) and asked to pick the best
+match, or `NONE`. A confident match gets placed straight into that slot
+(same swap-to-pool behavior as manual assignment); anything Gemini can't
+classify — or everything, if the key isn't set — stays in the pool exactly
+like before this existed. Calls Gemini's REST API directly over
+`httpx.AsyncClient` rather than the (synchronous) official SDK, and
+sequentially rather than in parallel, to stay within free-tier rate limits
+and to avoid blocking the shared event loop the way a synchronous call
+would (this app has a real history of exactly that mistake with the
+Cliniccards sync — see `app/services/sync_service.py`'s
+`sync_second_consultations_blocking` docstring). Verified: a
+missing key is a silent no-op, an invalid key fails closed (image stays in
+the pool, no crash — confirmed against Gemini's real API, which correctly
+returns 400 API_KEY_INVALID for a bad key), and a mocked confident match
+places the image in the right slot and correctly swaps out any previous
+occupant.
 
 **Phase 5 — Clinical Analysis Wizard, one photo at a time.** The wizard now
 walks the clinic's own confirmed 13-step capture order (given directly, not

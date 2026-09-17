@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.integrations.cliniccards.base import CliniccardsAdapter
 from app.integrations.cliniccards.types import CliniccardsAppointment
+from app.integrations.image_classifier import classify_image_type
 from app.models.case import ALLOWED_TRANSITIONS, TreatmentPlanCase
 from app.models.cliniccards import CliniccardsAppointmentCache, CliniccardsPatientCache
 from app.models.enums import CaseStatus, ReviewDecision, Role
@@ -384,11 +385,14 @@ def save_uploaded_image(
 
 
 def upload_to_pool(db: Session, case: TreatmentPlanCase, files: list[tuple[str, str, bytes]]) -> list[ClinicalImage]:
-    """"Hammasini yuklash": no classifier exists yet, so uploaded files
-    don't get auto-assigned to a slot — they land in the case's "bulut"
-    (image_type_id=NULL) for staff to drag/pick into the right slot
-    themselves via assign_pool_image_to_slot. Doesn't touch progress:
-    only images actually assigned to a required slot count toward it."""
+    """"Hammasini yuklash": files land in the case's "bulut"
+    (image_type_id=NULL) first. The caller (bulk_upload_case_images) then
+    runs auto_classify_pool_images on the result to try placing each one
+    automatically; anything it can't confidently place — or everything, if
+    GEMINI_API_KEY isn't configured — stays here for staff to drag/pick
+    into the right slot themselves via assign_pool_image_to_slot. Doesn't
+    touch progress: only images actually assigned to a required slot count
+    toward it."""
     now = datetime.now(timezone.utc)
     images = []
     for filename, mime_type, data in files:
@@ -407,13 +411,27 @@ def upload_to_pool(db: Session, case: TreatmentPlanCase, files: list[tuple[str, 
     return images
 
 
+def _place_image_in_slot(db: Session, case: TreatmentPlanCase, image: ClinicalImage, image_type_id: uuid.UUID) -> None:
+    """Shared by manual (assign_pool_image_to_slot) and automatic
+    (auto_classify_pool_images) placement: if the slot already had a
+    (different) image, the old occupant goes back to the bulut instead of
+    being deleted — spec: "xato kiritgan rasmim bulutga qayta qo'shilsin"."""
+    existing = db.execute(
+        select(ClinicalImage).where(ClinicalImage.case_id == case.id, ClinicalImage.image_type_id == image_type_id)
+    ).scalar_one_or_none()
+    if existing and existing.id != image.id:
+        existing.image_type_id = None  # back to the bulut, not deleted
+
+    image.image_type_id = image_type_id
+    db.flush()
+    recompute_images_progress(db, case)
+
+
 def assign_pool_image_to_slot(
     db: Session, case: TreatmentPlanCase, image_type_id: uuid.UUID, pool_image_id: uuid.UUID
 ) -> ClinicalImage:
-    """Moves one "bulut" image into a required-image slot. If that slot
-    already had a (different) image, the old occupant goes back to the
-    bulut instead of being deleted — spec: "xato kiritgan rasmim bulutga
-    qayta qo'shilsin"."""
+    """Moves one "bulut" image into a required-image slot (staff picking it
+    by hand — see auto_classify_pool_images for the automatic version)."""
     pool_image = db.execute(
         select(ClinicalImage).where(ClinicalImage.id == pool_image_id, ClinicalImage.case_id == case.id)
     ).scalar_one_or_none()
@@ -422,16 +440,34 @@ def assign_pool_image_to_slot(
     if pool_image.image_type_id is not None:
         raise ValueError("Bu rasm allaqachon boshqa joyga biriktirilgan")
 
-    existing = db.execute(
-        select(ClinicalImage).where(ClinicalImage.case_id == case.id, ClinicalImage.image_type_id == image_type_id)
-    ).scalar_one_or_none()
-    if existing and existing.id != pool_image.id:
-        existing.image_type_id = None  # back to the bulut, not deleted
-
-    pool_image.image_type_id = image_type_id
-    db.flush()
-    recompute_images_progress(db, case)
+    _place_image_in_slot(db, case, pool_image, image_type_id)
     return pool_image
+
+
+async def auto_classify_pool_images(db: Session, case: TreatmentPlanCase, images: list[ClinicalImage]) -> None:
+    """Best-effort automatic recognition for freshly-uploaded "bulut" images
+    (see app/integrations/image_classifier.py) — tries to place each one
+    straight into its slot, with the same non-destructive swap-to-pool
+    behavior as assign_pool_image_to_slot. A no-op (images stay in the pool
+    for manual sorting, exactly like before this feature existed) if
+    GEMINI_API_KEY isn't configured, or per-image if Gemini can't
+    confidently classify it.
+
+    Sequential, not parallel: free-tier Gemini API quotas are a handful of
+    requests per minute, and a burst of concurrent calls from one bulk
+    upload would blow through that immediately."""
+    image_types = db.execute(select(ImageType).where(ImageType.is_active.is_(True))).scalars().all()
+    if not image_types:
+        return
+    candidates = [(t.code, t.label) for t in image_types]
+    by_code = {t.code: t.id for t in image_types}
+
+    for image in images:
+        if image.image_type_id is not None or not image.file_data:
+            continue
+        code = await classify_image_type(image.file_data, image.mime_type or "image/jpeg", candidates)
+        if code and code in by_code:
+            _place_image_in_slot(db, case, image, by_code[code])
 
 
 def assign_case(db: Session, case: TreatmentPlanCase, planner_user_id: uuid.UUID, *, actor_user_id: uuid.UUID, note: str | None = None) -> None:
