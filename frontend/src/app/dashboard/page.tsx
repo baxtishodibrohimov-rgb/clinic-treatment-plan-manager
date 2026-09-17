@@ -31,6 +31,77 @@ function formatUzDate(d: Date): string {
   return `${d.getDate()}-${UZ_MONTHS[d.getMonth()]}, ${d.getFullYear()}`;
 }
 
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+type CalendarDay = {
+  day: number;
+  isToday: boolean;
+  isSelected: boolean;
+  hasConsultation: boolean;
+};
+
+function buildCalendarDays(monthOf: Date, selected: Date, consultationDays: Set<number>): (CalendarDay | null)[] {
+  const year = monthOf.getFullYear();
+  const month = monthOf.getMonth();
+  const today = new Date();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Monday=0
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (CalendarDay | null)[] = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let day = 1; day <= daysInMonth; day++) {
+    cells.push({
+      day,
+      isToday: isSameDay(new Date(year, month, day), today),
+      isSelected: isSameDay(new Date(year, month, day), selected),
+      hasConsultation: consultationDays.has(day),
+    });
+  }
+  return cells;
+}
+
+function CalendarDropdown({
+  selectedDate,
+  onSelect,
+  consultationDays,
+}: {
+  selectedDate: Date;
+  onSelect: (d: Date) => void;
+  consultationDays: Set<number>;
+}) {
+  const cells = buildCalendarDays(selectedDate, selectedDate, consultationDays);
+  return (
+    <div className="absolute top-full left-0 z-50 mt-1.5 w-[260px] rounded-md border border-divider bg-surface p-3 shadow-lg">
+      <div className="mb-2 text-center text-sm font-medium">
+        {UZ_MONTHS[selectedDate.getMonth()]} {selectedDate.getFullYear()}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((c, i) =>
+          c === null ? (
+            <div key={i} />
+          ) : (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onSelect(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), c.day))}
+              className={`aspect-square rounded-md border text-xs ${
+                c.isSelected
+                  ? "border-accent bg-accent font-semibold text-white"
+                  : c.hasConsultation
+                    ? "border-accent bg-tag-accent-bg font-semibold text-ink"
+                    : "border-divider bg-surface text-body"
+              } ${c.isToday && !c.isSelected ? "text-accent" : ""}`}
+            >
+              {c.day}
+            </button>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 function timeLeftLabel(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -350,6 +421,7 @@ export default function DashboardPage() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [loading, setLoading] = useState(true);
   const [showNewPatient, setShowNewPatient] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   const load = async () => {
     const [c, types] = await Promise.all([
@@ -376,6 +448,15 @@ export default function DashboardPage() {
   const selectedCases = cases.filter(
     (item) => item.consultation_datetime && toLocalDateValue(new Date(item.consultation_datetime)) === selectedDateValue,
   );
+  const consultationDaysThisMonth = new Set(
+    cases
+      .filter((item) => {
+        if (!item.consultation_datetime) return false;
+        const d = new Date(item.consultation_datetime);
+        return d.getFullYear() === selectedDate.getFullYear() && d.getMonth() === selectedDate.getMonth();
+      })
+      .map((item) => new Date(item.consultation_datetime as string).getDate()),
+  );
 
   return (
     <Shell>
@@ -395,16 +476,43 @@ export default function DashboardPage() {
           <button
             type="button"
             title="Oldingi kun"
-            onClick={() => setSelectedDate((d) => addDays(d, -1))}
+            onClick={() => {
+              setSelectedDate((d) => addDays(d, -1));
+              setCalendarOpen(false);
+            }}
             className="rounded-md px-2.5 py-1 text-accent hover:bg-tag-neutral-bg"
           >
             ←
           </button>
-          <span className="font-heading text-base font-medium">{formatUzDate(selectedDate)}</span>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setCalendarOpen((v) => !v)}
+              className="rounded-md px-2 py-1 font-heading text-base font-medium hover:bg-tag-neutral-bg"
+            >
+              {isSameDay(selectedDate, new Date()) ? "Bugun" : formatUzDate(selectedDate)}
+            </button>
+            {calendarOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setCalendarOpen(false)} />
+                <CalendarDropdown
+                  selectedDate={selectedDate}
+                  consultationDays={consultationDaysThisMonth}
+                  onSelect={(d) => {
+                    setSelectedDate(d);
+                    setCalendarOpen(false);
+                  }}
+                />
+              </>
+            )}
+          </div>
           <button
             type="button"
             title="Keyingi kun"
-            onClick={() => setSelectedDate((d) => addDays(d, 1))}
+            onClick={() => {
+              setSelectedDate((d) => addDays(d, 1));
+              setCalendarOpen(false);
+            }}
             className="rounded-md px-2.5 py-1 text-accent hover:bg-tag-neutral-bg"
           >
             →
