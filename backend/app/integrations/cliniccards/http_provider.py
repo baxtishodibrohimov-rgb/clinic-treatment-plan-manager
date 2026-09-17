@@ -8,11 +8,19 @@ from app.config import Settings
 from app.integrations.cliniccards.base import CliniccardsAdapter
 from app.integrations.cliniccards.types import CliniccardsAppointment, CliniccardsDocument, CliniccardsImage, CliniccardsPatient, GetAppointmentsParams
 
+# Cliniccards returns bare "YYYY-MM-DDTHH:MM:SS" timestamps with no UTC "Z"
+# or offset — confirmed against real data (a visit shown as 15:00 in
+# Cliniccards' own schedule was coming out as 20:00 in our dashboard, a
+# consistent +5h shift across every appointment checked). That's because
+# those bare timestamps are already Tashkent local time (UTC+5), not UTC —
+# attaching UTC to them was shifting every visit 5 hours into the future.
+_UZ_TZ = timezone(timedelta(hours=5))
+
 def _dt(value: Any) -> datetime | None:
     if not value: return None
     try: parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
     except ValueError: return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=_UZ_TZ)
 
 def _date(value: Any) -> date | None:
     if not value:
