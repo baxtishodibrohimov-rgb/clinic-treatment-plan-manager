@@ -3,15 +3,13 @@ secret header rather than user auth, since the caller is Cliniccards, not a
 logged-in user. Real payload shape is unknown until their API docs are
 provided, so this accepts a small generic envelope and re-runs the same
 idempotent sync path as the poller for just that one appointment."""
+import asyncio
+
 from fastapi import APIRouter, Header, HTTPException, status
-from sqlalchemy.orm import Session
-from fastapi import Depends
 
 from app.config import get_settings
-from app.database import get_db
-from app.integrations.cliniccards.factory import get_cliniccards_adapter
 from app.models.enums import SyncType
-from app.services.sync_service import sync_second_consultations
+from app.services.sync_service import sync_second_consultations_blocking
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
@@ -19,7 +17,6 @@ router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 @router.post("/cliniccards")
 async def cliniccards_webhook(
     payload: dict,
-    db: Session = Depends(get_db),
     x_cliniccards_signature: str | None = Header(default=None),
 ) -> dict:
     settings = get_settings()
@@ -35,5 +32,8 @@ async def cliniccards_webhook(
     if not appointment_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "appointmentId missing in payload")
 
-    adapter = get_cliniccards_adapter()
-    return await sync_second_consultations(db, adapter, SyncType.WEBHOOK, appointment_id)
+    # Runs on its own thread + event loop so a webhook (which Cliniccards
+    # can fire often) doesn't freeze the shared event loop — and every
+    # other user's request — for however long the sync takes. See
+    # sync_second_consultations_blocking's docstring.
+    return await asyncio.to_thread(sync_second_consultations_blocking, SyncType.WEBHOOK, appointment_id)

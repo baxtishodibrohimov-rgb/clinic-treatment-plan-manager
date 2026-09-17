@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -5,7 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.case import TreatmentPlanCase
 from app.models.clinic import Clinic
 from app.models.cliniccards import CliniccardsPatientCache
@@ -227,9 +228,69 @@ def create_manual_case_endpoint(
     )
 
 
+def _create_case_from_cliniccards_id_blocking(
+    *,
+    cliniccards_patient_id: str,
+    doctor_name: str | None,
+    consultation_datetime: datetime,
+    clinic_id: uuid.UUID,
+    priority,
+) -> CaseListItem:
+    """Runs on its own thread + event loop (see the endpoint below) since
+    create_case_from_cliniccards_patient fetches the patient and imports
+    every one of their images from Cliniccards — real network calls mixed
+    with a lot of synchronous DB writes, exactly the pattern that was
+    confirmed (see sync_second_consultations_blocking's docstring) to
+    freeze the whole app for every user if run directly on the shared
+    event loop."""
+    db = SessionLocal()
+    try:
+        adapter = get_cliniccards_adapter()
+        try:
+            case = asyncio.run(
+                create_case_from_cliniccards_patient(
+                    db,
+                    adapter,
+                    cliniccards_patient_id=cliniccards_patient_id,
+                    doctor_name=doctor_name,
+                    consultation_datetime=consultation_datetime,
+                    clinic_id=clinic_id,
+                    priority=priority,
+                )
+            )
+        except ValueError as e:
+            db.rollback()
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from None
+        db.commit()
+        db.refresh(case)
+
+        patient = db.execute(
+            select(CliniccardsPatientCache).where(
+                CliniccardsPatientCache.cliniccards_patient_id == case.cliniccards_patient_id
+            )
+        ).scalar_one_or_none()
+        clinic_name = db.get(Clinic, clinic_id).name if clinic_id else None
+        planner_name = db.get(User, case.responsible_planner_user_id).full_name if case.responsible_planner_user_id else None
+        return CaseListItem(
+            id=case.id,
+            status=case.status,
+            priority=case.priority,
+            consultation_datetime=case.consultation_datetime,
+            deadline=case.deadline,
+            images_progress_percent=case.images_progress_percent,
+            patient_name=patient.full_name if patient else cliniccards_patient_id,
+            doctor_name=case.primary_doctor_name,
+            planner_name=planner_name,
+            clinic_id=clinic_id,
+            clinic_name=clinic_name,
+        )
+    finally:
+        db.close()
+
+
 @router.post("/manual/by-cliniccards-id", response_model=CaseListItem, status_code=status.HTTP_201_CREATED)
 async def create_case_from_cliniccards_id_endpoint(
-    payload: ManualCaseFromCliniccardsRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+    payload: ManualCaseFromCliniccardsRequest, user: User = Depends(get_current_user)
 ) -> CaseListItem:
     """Staff already knows the patient's real Cliniccards card number (e.g.
     they just walked in with their card, or their 2nd visit hasn't synced
@@ -244,42 +305,13 @@ async def create_case_from_cliniccards_id_endpoint(
         if clinic_id is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sizga hech qanday klinika biriktirilmagan")
 
-    adapter = get_cliniccards_adapter()
-    try:
-        case = await create_case_from_cliniccards_patient(
-            db,
-            adapter,
-            cliniccards_patient_id=payload.cliniccards_patient_id,
-            doctor_name=payload.doctor_name,
-            consultation_datetime=payload.consultation_datetime,
-            clinic_id=clinic_id,
-            priority=payload.priority,
-        )
-    except ValueError as e:
-        db.rollback()
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from None
-    db.commit()
-    db.refresh(case)
-
-    patient = db.execute(
-        select(CliniccardsPatientCache).where(
-            CliniccardsPatientCache.cliniccards_patient_id == case.cliniccards_patient_id
-        )
-    ).scalar_one_or_none()
-    clinic_name = db.get(Clinic, clinic_id).name if clinic_id else None
-    planner_name = db.get(User, case.responsible_planner_user_id).full_name if case.responsible_planner_user_id else None
-    return CaseListItem(
-        id=case.id,
-        status=case.status,
-        priority=case.priority,
-        consultation_datetime=case.consultation_datetime,
-        deadline=case.deadline,
-        images_progress_percent=case.images_progress_percent,
-        patient_name=patient.full_name if patient else payload.cliniccards_patient_id,
-        doctor_name=case.primary_doctor_name,
-        planner_name=planner_name,
+    return await asyncio.to_thread(
+        _create_case_from_cliniccards_id_blocking,
+        cliniccards_patient_id=payload.cliniccards_patient_id,
+        doctor_name=payload.doctor_name,
+        consultation_datetime=payload.consultation_datetime,
         clinic_id=clinic_id,
-        clinic_name=clinic_name,
+        priority=payload.priority,
     )
 
 

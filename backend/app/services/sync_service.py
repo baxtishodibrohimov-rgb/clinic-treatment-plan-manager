@@ -3,6 +3,7 @@
 Shared between the periodic Celery poll, the webhook endpoint, and the
 "Sync now" admin action, so all three paths create/update cases identically.
 """
+import asyncio
 import re
 import uuid
 from datetime import datetime, timezone
@@ -10,7 +11,9 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
 from app.integrations.cliniccards.base import CliniccardsAdapter
+from app.integrations.cliniccards.factory import get_cliniccards_adapter
 from app.integrations.cliniccards.types import CliniccardsAppointment
 from app.models.clinic import Clinic
 from app.models.enums import SyncStatus, SyncType
@@ -112,3 +115,31 @@ async def sync_second_consultations(
     db.commit()
 
     return {"records_seen": records_seen, "cases_created": cases_created, "errors": errors}
+
+
+def sync_second_consultations_blocking(sync_type: SyncType, only_appointment_id: str | None = None) -> dict:
+    """Entry point for anywhere that isn't already running its own
+    dedicated background loop: the manual "Sync now" endpoint and the
+    Cliniccards webhook handler.
+
+    sync_second_consultations() above is `async def`, but everything it
+    actually does — every db.execute/commit/flush inside ensure_case,
+    upsert_patient_cache, import_images, etc. — is a *synchronous*, blocking
+    SQLAlchemy call. Calling it directly with `await` from a FastAPI
+    `async def` route runs all of that on the one shared event loop that
+    serves every other request, so the whole app freezes for every user for
+    as long as the sync takes (confirmed: a concurrent 5ms heartbeat task
+    got zero ticks for the full ~190ms of a 5-appointment mock sync — with
+    real Cliniccards network calls this is seconds, not milliseconds).
+
+    This function builds its own DB session and Cliniccards adapter and
+    runs the whole sync on a fresh event loop, so it's safe to call via
+    `await asyncio.to_thread(sync_second_consultations_blocking, ...)` —
+    the shared event loop stays free to keep serving everyone else while
+    this runs on its own thread."""
+    db = SessionLocal()
+    try:
+        adapter = get_cliniccards_adapter()
+        return asyncio.run(sync_second_consultations(db, adapter, sync_type, only_appointment_id))
+    finally:
+        db.close()

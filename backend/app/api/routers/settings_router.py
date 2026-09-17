@@ -1,9 +1,10 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.integrations.cliniccards.factory import get_cliniccards_adapter
 from app.models.enums import SyncType
 from app.models.settings import AppSetting, AssignmentConfig
 from app.models.sync_log import IntegrationSyncLog
@@ -17,7 +18,7 @@ from app.schemas.config import (
 )
 from app.security.deps import require_admin, require_super_admin
 from app.services.reset_service import RESET_CONFIRM_PHRASE, reset_patient_data
-from app.services.sync_service import sync_second_consultations
+from app.services.sync_service import sync_second_consultations_blocking
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_admin)])
 
@@ -70,9 +71,12 @@ def sync_log(db: Session = Depends(get_db)) -> list[SyncLogOut]:
 
 
 @router.post("/sync-now")
-async def sync_now(db: Session = Depends(get_db)) -> dict:
-    adapter = get_cliniccards_adapter()
-    return await sync_second_consultations(db, adapter, SyncType.MANUAL)
+async def sync_now() -> dict:
+    # Runs on its own thread + event loop so this request doesn't freeze
+    # the shared event loop (and every other user's request) for however
+    # long the real Cliniccards sync takes — see
+    # sync_second_consultations_blocking's docstring.
+    return await asyncio.to_thread(sync_second_consultations_blocking, SyncType.MANUAL)
 
 
 @router.post("/reset-patient-data", dependencies=[Depends(require_super_admin)])
