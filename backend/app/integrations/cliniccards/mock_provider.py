@@ -57,10 +57,6 @@ def _appointment_id(patient_id: str) -> str:
     return f"{patient_id}-APT-2CONS"
 
 
-def _first_visit_appointment_id(patient_id: str) -> str:
-    return f"{patient_id}-APT-1CONS"
-
-
 def _to_patient(seed: _PatientSeed) -> CliniccardsPatient:
     return CliniccardsPatient(
         patient_id=seed.patient_id,
@@ -68,23 +64,6 @@ def _to_patient(seed: _PatientSeed) -> CliniccardsPatient:
         birth_date=date.fromisoformat(seed.birth_date),
         phone=seed.phone,
         created_at=datetime.now(timezone.utc),
-        raw={"mock": True},
-    )
-
-
-def _to_first_visit(seed: _PatientSeed) -> CliniccardsAppointment:
-    # A patient's actual 1st visit, weeks before their upcoming 2nd —
-    # exists so the "is this the 2nd visit in history" check has a real
-    # history to compare against, same as the real Cliniccards data.
-    scheduled_at = datetime.now(timezone.utc) + timedelta(days=seed.days_until_consultation) - timedelta(days=21)
-    return CliniccardsAppointment(
-        appointment_id=_first_visit_appointment_id(seed.patient_id),
-        patient_id=seed.patient_id,
-        doctor_name=seed.doctor_name,
-        appointment_type_code="consultation_1",
-        appointment_type_label="1-konsultatsiya",
-        scheduled_at=scheduled_at,
-        note="1st visit",
         raw={"mock": True},
     )
 
@@ -112,13 +91,8 @@ class MockCliniccardsAdapter(CliniccardsAdapter):
         return _to_patient(seed) if seed else None
 
     async def get_appointments(self, params: GetAppointmentsParams | None = None) -> list[CliniccardsAppointment]:
-        # Every visit, not pre-labeled by ordinal position — same as the
-        # real /visits endpoint. Whether one of these is a patient's 2nd
-        # visit ever is worked out from history, not from a type/label here.
-        appts = [a for s in PATIENT_SEEDS for a in (_to_first_visit(s), _to_appointment(s))]
+        appts = [_to_appointment(s) for s in PATIENT_SEEDS]
         if params:
-            if params.patient_id:
-                appts = [a for a in appts if a.patient_id == params.patient_id]
             if params.appointment_type_code:
                 appts = [a for a in appts if a.appointment_type_code == params.appointment_type_code]
             if params.from_:
