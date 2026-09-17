@@ -65,6 +65,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [dragOverBulk, setDragOverBulk] = useState(false);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
   const [poolPickerFor, setPoolPickerFor] = useState<string | null>(null);
+  const [photoFullscreen, setPhotoFullscreen] = useState(false);
 
   const load = async () => {
     const [detail, qs] = await Promise.all([
@@ -199,27 +200,42 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[220px_repeat(3,minmax(0,1fr))]">
-          <button
-            type="button"
-            onClick={() => {
-              if (!faceType) return;
-              setSingleUploadTypeId(faceType.id);
-              singleInputRef.current?.click();
-            }}
-            title="Bosh rasmni almashtirish"
-            className="flex min-h-[260px] items-center justify-center overflow-hidden rounded-lg bg-tag-neutral-bg"
-          >
-            {faceImage && faceImage.external_url ? (
-              <AuthenticatedImage
-                key={`${faceImage.id}-${uploadVersion}`}
-                src={faceImage.external_url}
-                alt={data.patient?.full_name ?? ""}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <span className="text-xs text-muted">+ Bosh rasm</span>
+          <div className="relative min-h-[260px] overflow-hidden rounded-lg bg-tag-neutral-bg">
+            <button
+              type="button"
+              onClick={() => {
+                if (!faceType) return;
+                setSingleUploadTypeId(faceType.id);
+                singleInputRef.current?.click();
+              }}
+              title="Bosh rasmni almashtirish"
+              className="flex h-full min-h-[260px] w-full items-center justify-center"
+            >
+              {faceImage && faceImage.external_url ? (
+                <AuthenticatedImage
+                  key={`${faceImage.id}-${uploadVersion}`}
+                  src={faceImage.external_url}
+                  alt={data.patient?.full_name ?? ""}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="text-xs text-muted">+ Bosh rasm</span>
+              )}
+            </button>
+            {faceImage && faceImage.external_url && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPhotoFullscreen(true);
+                }}
+                title="To'liq ekran"
+                className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-md border border-white/60 bg-black/45 text-sm text-white"
+              >
+                ⛶
+              </button>
             )}
-          </button>
+          </div>
 
           <div className="rounded-lg border border-divider bg-surface p-4 text-sm">
             <h2 className="mb-1.5 font-medium text-ink">Case ma&apos;lumotlari</h2>
@@ -445,6 +461,16 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
       </div>
+
+      {photoFullscreen && faceImage && faceImage.external_url && (
+        <div
+          onClick={() => setPhotoFullscreen(false)}
+          className="fixed inset-0 z-[1000] flex items-center justify-center p-5"
+          style={{ background: "rgba(22,36,28,0.92)" }}
+        >
+          <AuthenticatedImage src={faceImage.external_url} alt={data.patient?.full_name ?? ""} className="max-h-full max-w-full object-contain" />
+        </div>
+      )}
 
       {poolPickerFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPoolPickerFor(null)}>
