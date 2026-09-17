@@ -383,9 +383,28 @@ async def _read_upload(file: UploadFile) -> tuple[str, str, bytes]:
     return file.filename or "rasm", file.content_type or "application/octet-stream", data
 
 
+def _bulk_upload_case_images_blocking(
+    case_id: uuid.UUID, read_files: list[tuple[str, str, bytes]], user: User
+) -> CaseDetail:
+    """Own thread + DB session — auto_classify_pool_images calls the Gemini
+    vision API once per photo, sequentially (see its docstring), so a bulk
+    upload of 10+ photos could hold the shared event loop for seconds if
+    run directly on it, freezing every other user's request in the
+    meantime. Same pattern as _create_case_from_cliniccards_id_blocking."""
+    db = SessionLocal()
+    try:
+        case = _get_case_or_404(db, case_id, user)
+        images = upload_to_pool(db, case, read_files)
+        asyncio.run(auto_classify_pool_images(db, case, images))
+        db.commit()
+        return get_case(case_id, db, user)
+    finally:
+        db.close()
+
+
 @router.post("/{case_id}/images/bulk-upload", response_model=CaseDetail)
 async def bulk_upload_case_images(
-    case_id: uuid.UUID, files: list[UploadFile] = File(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)
+    case_id: uuid.UUID, files: list[UploadFile] = File(...), user: User = Depends(get_current_user)
 ) -> CaseDetail:
     """"Hammasini yuklash" — files land in the case's "bulut"
     (image_type_id=NULL), then auto_classify_pool_images tries to place
@@ -393,12 +412,8 @@ async def bulk_upload_case_images(
     app/integrations/image_classifier.py). Anything it can't confidently
     place — or everything, if GEMINI_API_KEY isn't configured — stays in
     the bulut for staff to assign by hand via assign-from-pool."""
-    case = _get_case_or_404(db, case_id, user)
     read_files = [await _read_upload(f) for f in files]
-    images = upload_to_pool(db, case, read_files)
-    await auto_classify_pool_images(db, case, images)
-    db.commit()
-    return get_case(case_id, db, user)
+    return await asyncio.to_thread(_bulk_upload_case_images_blocking, case_id, read_files, user)
 
 
 @router.post("/{case_id}/images/{image_type_id}/assign-from-pool", response_model=CaseDetail)
@@ -423,23 +438,33 @@ def assign_from_pool_endpoint(
     return get_case(case_id, db, user)
 
 
+def _upload_case_image_blocking(
+    case_id: uuid.UUID, image_type_id: uuid.UUID, filename: str, mime_type: str, data: bytes, user: User
+) -> CaseDetail:
+    """Own thread + DB session — see _bulk_upload_case_images_blocking."""
+    db = SessionLocal()
+    try:
+        case = _get_case_or_404(db, case_id, user)
+        if not db.get(ImageType, image_type_id):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Rasm turi topilmadi")
+        save_uploaded_image(db, case, image_type_id, filename=filename, mime_type=mime_type, data=data)
+        db.commit()
+        return get_case(case_id, db, user)
+    finally:
+        db.close()
+
+
 @router.post("/{case_id}/images/{image_type_id}", response_model=CaseDetail)
 async def upload_case_image(
     case_id: uuid.UUID,
     image_type_id: uuid.UUID,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CaseDetail:
     """Replace/set a single required-image slot — used to fix a slot the
     bulk upload above assigned incorrectly, or to add one photo at a time."""
-    case = _get_case_or_404(db, case_id, user)
-    if not db.get(ImageType, image_type_id):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Rasm turi topilmadi")
     filename, mime_type, data = await _read_upload(file)
-    save_uploaded_image(db, case, image_type_id, filename=filename, mime_type=mime_type, data=data)
-    db.commit()
-    return get_case(case_id, db, user)
+    return await asyncio.to_thread(_upload_case_image_blocking, case_id, image_type_id, filename, mime_type, data, user)
 
 
 @router.post("/{case_id}/assign", status_code=status.HTTP_204_NO_CONTENT)
