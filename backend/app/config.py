@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # history, not just the narrow window above used to spot new bookings.
     cliniccards_history_days_back: int = 3650
     cliniccards_webhook_secret: str | None = None
+    # Runs the sync in-process (no separate worker needed — see
+    # app/jobs/periodic_sync.py) every N minutes, in addition to the manual
+    # "Sync now" button. Celery + celery-beat also has this same task
+    # scheduled, but only if that worker is actually deployed separately.
+    cliniccards_auto_sync_minutes: int = 30
 
     # Telegram
     telegram_bot_token: str | None = None

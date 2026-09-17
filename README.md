@@ -61,10 +61,13 @@ npm run dev   # http://localhost:3000
 real seeded user, including that a non-admin correctly gets 403 on
 admin-only endpoints.
 
-**Phase 2 — Cliniccards sync.** `POST /api/settings/sync-now` (or wait for
-the 5-minute Celery beat tick) against the mock adapter: first run creates
-5 cases, re-running immediately creates 0 (`cases_created: 0`) — idempotency
-confirmed against a real Postgres unique constraint, not just in theory.
+**Phase 2 — Cliniccards sync.** `POST /api/settings/sync-now` (or just wait
+— the app also runs this automatically in-process every
+`CLINICCARDS_AUTO_SYNC_MINUTES` minutes, default 30, no separate worker
+needed; see `app/jobs/periodic_sync.py`) against the mock adapter: first
+run creates 5 cases, re-running immediately creates 0 (`cases_created: 0`)
+— idempotency confirmed against a real Postgres unique constraint, not
+just in theory.
 
 **Phase 3 — assignment + dashboard.** `/dashboard` renders a 10-column
 Kanban from `GET /api/cases`; `POST /api/cases/{id}/assign` was exercised
