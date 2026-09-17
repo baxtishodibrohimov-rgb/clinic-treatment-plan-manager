@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     # scheduled, but only if that worker is actually deployed separately.
     cliniccards_auto_sync_minutes: int = 30
 
+    # We don't keep clinical photos/x-rays forever — once a case's
+    # consultation is this many days in the past, the image files are
+    # purged (see app/jobs/periodic_image_cleanup.py). Everything else
+    # about the case (diagnosis, analysis answers, findings) is untouched.
+    image_retention_days: int = 7
+
     # Telegram
     telegram_bot_token: str | None = None
 
