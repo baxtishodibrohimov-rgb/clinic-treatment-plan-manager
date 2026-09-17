@@ -147,6 +147,16 @@ def ensure_case(
         select(TreatmentPlanCase).where(TreatmentPlanCase.cliniccards_appointment_id == appt.appointment_id)
     ).scalar_one_or_none()
     if existing:
+        # Cliniccards is the source of truth for scheduling — keep the case
+        # in sync with it on every re-sync (this is also how an existing
+        # case picks up a corrected time after a parsing bug like the +5h
+        # timezone issue: the DB row was written with the old, wrong value
+        # and nothing re-syncs it unless we actively update it here).
+        deadline_hours = float(get_setting(db, "default_deadline_hours_before_consultation", 24))
+        existing.consultation_datetime = appt.scheduled_at
+        existing.deadline = appt.scheduled_at - timedelta(hours=deadline_hours)
+        existing.primary_doctor_name = appt.doctor_name
+        db.flush()
         return existing, False
 
     deadline_hours = float(get_setting(db, "default_deadline_hours_before_consultation", 24))
@@ -289,17 +299,22 @@ async def import_images(db: Session, adapter: CliniccardsAdapter, case: Treatmen
     by_label = {t.label.lower(): t.id for t in image_types}
 
     for img in images:
-        image_type_id = by_label.get(img.label_hint.lower()) if img.label_hint else None
         image = db.execute(
             select(ClinicalImage).where(
                 ClinicalImage.case_id == case.id, ClinicalImage.cliniccards_document_id == img.image_id
             )
         ).scalar_one_or_none()
         if image:
-            image.image_type_id = image_type_id
+            # image_type_id is deliberately NOT touched here: once an image
+            # exists, its slot may have been set by the label guess below,
+            # by staff moving it from the bulut, or by auto-classification
+            # — re-running this same label lookup on every sync (this
+            # function runs automatically every 30 minutes) was wiping all
+            # of that out and dropping the image back in the pool.
             image.external_url = img.url
             image.captured_at = img.captured_at
         else:
+            image_type_id = by_label.get(img.label_hint.lower()) if img.label_hint else None
             image = ClinicalImage(
                 case_id=case.id,
                 image_type_id=image_type_id,
