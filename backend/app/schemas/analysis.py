@@ -67,3 +67,21 @@ class ToothClickRequest(BaseModel):
     quadrant: int
     position: int
     click_type: str  # "single" | "double"
+
+
+class ImageAnnotationOut(BaseModel):
+    id: uuid.UUID
+    image_id: uuid.UUID
+    annotation_json: list
+    version: int
+
+    model_config = {"from_attributes": True}
+
+
+class ImageAnnotationIn(BaseModel):
+    # One free-form oval/rect "mark" plus a list of line/arrow shapes, in
+    # the exact shape the annotation toolbar (case detail → analysis →
+    # fullscreen drawing) produces: {x1,y1,x2,y2 as % of the image, color,
+    # width, shape}. Kept as JSONB so the toolbar can evolve without a
+    # migration.
+    annotation_json: list
