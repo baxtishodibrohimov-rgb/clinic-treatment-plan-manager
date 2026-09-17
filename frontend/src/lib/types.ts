@@ -169,6 +169,39 @@ export interface DentalChartOut {
   teeth: ToothStatusOut[];
 }
 
+export interface ImageAnnotationOut {
+  id: string;
+  image_id: string;
+  annotation_json: AnyMark[];
+  version: number;
+}
+
+// One free-form oval/rect region ("mark") plus zero or more line/arrow
+// shapes — coordinates are % of the image's rendered box, so they scale
+// with any display size (wizard fullscreen, presentation slide, PPTX export).
+export interface Mark {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: AnnotationColor;
+  width: number;
+  shape: "oval" | "rect";
+  kind: "mark";
+}
+export interface Arrow {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: AnnotationColor;
+  width: number;
+  shape: "line" | "arrow";
+  kind: "arrow";
+}
+export type AnyMark = Mark | Arrow;
+export type AnnotationColor = "red" | "green" | "blue" | "yellow" | "black";
+
 export interface SyncLogOut {
   id: string;
   sync_type: string;
