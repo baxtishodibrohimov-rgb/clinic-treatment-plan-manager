@@ -2,17 +2,30 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.integrations.cliniccards.factory import get_cliniccards_adapter
+from app.models.analysis import ImageAnnotation
 from app.models.case import TreatmentPlanCase
 from app.models.enums import ImageSource
 from app.models.image import ClinicalImage
 from app.models.user import User
+from app.schemas.analysis import ImageAnnotationIn, ImageAnnotationOut
 from app.security.deps import get_current_user
 
 router = APIRouter(prefix="/api/images", tags=["images"])
+
+
+def _get_image_or_404(db: Session, image_id: uuid.UUID, user: User) -> ClinicalImage:
+    image = db.get(ClinicalImage, image_id)
+    if not image:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Rasm topilmadi")
+    case = db.get(TreatmentPlanCase, image.case_id)
+    if not case or (not user.is_super_admin and case.clinic_id != user.clinic_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Rasm topilmadi")
+    return image
 
 
 @router.get("/{image_id}/file")
@@ -56,3 +69,51 @@ async def get_image_file(
         media_type=mime_type or "application/octet-stream",
         headers={"Cache-Control": "private, max-age=300"},
     )
+
+
+@router.get("/{image_id}/annotations", response_model=ImageAnnotationOut | None)
+def get_image_annotations(
+    image_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ImageAnnotationOut | None:
+    """The wizard's drawing toolbar (line/arrow/oval/rect over a photo) —
+    one shape list per image, versioned (spec section 12/43). Returns the
+    latest version, or null if nothing has been drawn on this image yet."""
+    _get_image_or_404(db, image_id, user)
+    row = db.execute(
+        select(ImageAnnotation)
+        .where(ImageAnnotation.image_id == image_id)
+        .order_by(ImageAnnotation.version.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return ImageAnnotationOut.model_validate(row) if row else None
+
+
+@router.put("/{image_id}/annotations", response_model=ImageAnnotationOut)
+def put_image_annotations(
+    image_id: uuid.UUID,
+    payload: ImageAnnotationIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ImageAnnotationOut:
+    """Replaces the image's shape list with a new version — each save is a
+    new row (spec's "versioned JSON"), never an in-place overwrite, so an
+    earlier state is never silently lost."""
+    _get_image_or_404(db, image_id, user)
+    prev_version = db.execute(
+        select(ImageAnnotation.version)
+        .where(ImageAnnotation.image_id == image_id)
+        .order_by(ImageAnnotation.version.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    row = ImageAnnotation(
+        image_id=image_id,
+        annotation_json=payload.annotation_json,
+        version=(prev_version or 0) + 1,
+        created_by_user_id=user.id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return ImageAnnotationOut.model_validate(row)
