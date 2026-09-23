@@ -41,13 +41,22 @@ export function AnnotationCanvas({
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const [resizing, setResizing] = useState(false);
   const [moving, setMoving] = useState<{ startPt: { x: number; y: number }; orig: Mark } | null>(null);
+  const [selectedArrowIndex, setSelectedArrowIndex] = useState<number | null>(null);
+  const [arrowDrag, setArrowDrag] = useState<{
+    index: number;
+    mode: "move" | "start" | "end";
+    startPt: { x: number; y: number };
+    orig: Arrow;
+  } | null>(null);
 
   const { mark: committedMark, arrows } = splitMarks(marks);
   // During resize/move we redraw every mousemove but only tell the parent
   // (which PUTs a new versioned DB row per call) once, on mouseup — else a
   // single drag would write dozens of rows.
   const [liveMark, setLiveMark] = useState<Mark | null>(null);
+  const [liveArrows, setLiveArrows] = useState<Arrow[] | null>(null);
   const mark = liveMark ?? committedMark;
+  const displayedArrows = liveArrows ?? arrows;
 
   useEffect(() => {
     if (!resizing && !moving) return;
@@ -79,6 +88,44 @@ export function AnnotationCanvas({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resizing, moving]);
+
+  useEffect(() => {
+    if (!arrowDrag) return;
+    const onMove = (e: MouseEvent) => {
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!rect || !rect.width || !rect.height) return;
+      const point = pct(e.clientX, e.clientY, rect);
+      const next = arrows.map((arrow, index) => {
+        if (index !== arrowDrag.index) return arrow;
+        if (arrowDrag.mode === "start") return { ...arrowDrag.orig, x1: point.x, y1: point.y };
+        if (arrowDrag.mode === "end") return { ...arrowDrag.orig, x2: point.x, y2: point.y };
+        const dx = point.x - arrowDrag.startPt.x;
+        const dy = point.y - arrowDrag.startPt.y;
+        return {
+          ...arrowDrag.orig,
+          x1: arrowDrag.orig.x1 + dx,
+          y1: arrowDrag.orig.y1 + dy,
+          x2: arrowDrag.orig.x2 + dx,
+          y2: arrowDrag.orig.y2 + dy,
+        };
+      });
+      setLiveArrows(next);
+    };
+    const onUp = () => {
+      setArrowDrag(null);
+      setLiveArrows((next) => {
+        if (next) onChange?.([...(mark ? [mark] : []), ...next]);
+        return null;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrowDrag]);
 
   const handleDragStart = (e: React.MouseEvent) => {
     if (!editable || !tool || resizing || moving) return;
@@ -121,6 +168,7 @@ export function AnnotationCanvas({
       const next: Arrow = { kind: "arrow", x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width, shape: tool };
       onChange?.([...(mark ? [mark] : []), ...arrows, next]);
     }
+    setTool(null);
   };
 
   const cycleMarkWidth = () => {
@@ -144,7 +192,20 @@ export function AnnotationCanvas({
     if (!rect) return;
     setMoving({ startPt: pct(e.clientX, e.clientY, rect), orig: mark });
   };
-  const clearAll = () => onChange?.([]);
+  const startArrowEdit = (e: React.MouseEvent, index: number, mode: "move" | "start" | "end") => {
+    e.stopPropagation();
+    e.preventDefault();
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTool(null);
+    setSelectedArrowIndex(index);
+    setArrowDrag({ index, mode, startPt: pct(e.clientX, e.clientY, rect), orig: arrows[index] });
+  };
+  const clearAll = () => {
+    setSelectedArrowIndex(null);
+    setTool(null);
+    onChange?.([]);
+  };
 
   const markCx = mark ? (mark.x1 + mark.x2) / 2 : 50;
   const markCy = mark ? (mark.y1 + mark.y2) / 2 : 50;
@@ -217,7 +278,7 @@ export function AnnotationCanvas({
           </>
         )}
 
-        {arrows.map((a, i) => (
+        {displayedArrows.map((a, i) => (
           <g key={i}>
             <line
               x1={`${a.x1}%`}
@@ -228,8 +289,23 @@ export function AnnotationCanvas({
               strokeWidth={a.width}
               markerEnd={a.shape === "arrow" ? `url(#${MARKER_PREFIX}-${idSalt}-${a.color})` : undefined}
               onDoubleClick={editable ? () => cycleArrowWidth(i) : undefined}
-              style={editable ? { pointerEvents: "auto", cursor: "pointer" } : undefined}
+              onClick={editable ? () => { setTool(null); setSelectedArrowIndex(i); } : undefined}
+              style={editable ? { pointerEvents: "auto", cursor: "move" } : undefined}
             />
+            {editable && (
+              <line
+                x1={`${a.x1}%`}
+                y1={`${a.y1}%`}
+                x2={`${a.x2}%`}
+                y2={`${a.y2}%`}
+                stroke="transparent"
+                strokeWidth={Math.max(14, a.width + 10)}
+                onMouseDown={(event) => startArrowEdit(event, i, "move")}
+                onClick={() => setSelectedArrowIndex(i)}
+                onDoubleClick={() => cycleArrowWidth(i)}
+                style={{ pointerEvents: "stroke", cursor: "move" }}
+              />
+            )}
             {a.shape === "line" && (
               <>
                 <circle cx={`${a.x1}%`} cy={`${a.y1}%`} r={4} fill={COLOR_HEX[a.color]} />
@@ -275,6 +351,36 @@ export function AnnotationCanvas({
           />
         )}
       </svg>
+
+      {editable && selectedArrowIndex !== null && displayedArrows[selectedArrowIndex] && (
+        <>
+          {(["start", "end"] as const).map((handle) => {
+            const arrow = displayedArrows[selectedArrowIndex];
+            const x = handle === "start" ? arrow.x1 : arrow.x2;
+            const y = handle === "start" ? arrow.y1 : arrow.y2;
+            return (
+              <div
+                key={handle}
+                title={handle === "start" ? "Boshlanish nuqtasini o‘zgartirish" : "Uzunligini o‘zgartirish"}
+                onMouseDown={(event) => startArrowEdit(event, selectedArrowIndex, handle)}
+                style={{
+                  position: "absolute",
+                  left: `${x}%`,
+                  top: `${y}%`,
+                  width: 16,
+                  height: 16,
+                  transform: "translate(-50%,-50%)",
+                  borderRadius: "50%",
+                  background: "#ffffff",
+                  border: `3px solid ${COLOR_HEX[arrow.color]}`,
+                  cursor: "move",
+                  zIndex: 8,
+                }}
+              />
+            );
+          })}
+        </>
+      )}
 
       {editable && mark && (
         <>

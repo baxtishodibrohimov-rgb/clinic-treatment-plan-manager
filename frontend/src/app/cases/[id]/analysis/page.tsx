@@ -129,6 +129,10 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
     try {
       const saved = await api.put<AnalysisAnswerOut>(`/api/cases/${id}/analysis-answers/${templateId}`, { value });
       setQuestions((prev) => prev.map((q) => (q.template.id === templateId ? { ...q, answer: saved } : q)));
+      const answeredQuestion = questions.find((q) => q.template.id === templateId);
+      if (answeredQuestion && (answeredQuestion.template.answer_type === "single_choice" || answeredQuestion.template.answer_type === "boolean")) {
+        setFlowIndex((index) => Math.min(WIZARD_FLOW.length - 1, index + 1));
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Saqlashda xatolik");
     }
