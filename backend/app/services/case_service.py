@@ -378,6 +378,8 @@ def save_uploaded_image(
     if existing:
         existing.source = ImageSource.UPLOAD
         existing.file_data = data
+        existing.thumbnail_data = None
+        existing.thumbnail_mime_type = None
         existing.mime_type = mime_type
         existing.original_filename = filename
         existing.external_url = None
@@ -457,6 +459,46 @@ def assign_pool_image_to_slot(
 
     _place_image_in_slot(db, case, pool_image, image_type_id)
     return pool_image
+
+
+def batch_assign_pool_images(
+    db: Session,
+    case: TreatmentPlanCase,
+    assignments: list[tuple[uuid.UUID, uuid.UUID]],
+) -> None:
+    """Apply the sorter screen's draft in one atomic transaction.
+
+    Validation happens before any slot is changed, so a stale or duplicated
+    selection cannot leave half of the case saved.
+    """
+    type_ids = [image_type_id for image_type_id, _ in assignments]
+    image_ids = [image_id for _, image_id in assignments]
+    if len(type_ids) != len(set(type_ids)) or len(image_ids) != len(set(image_ids)):
+        raise ValueError("Bir rasm yoki joy bir necha marta tanlangan")
+
+    valid_type_ids = set(
+        db.execute(
+            select(ImageType.id).where(ImageType.id.in_(type_ids), ImageType.is_active.is_(True))
+        ).scalars()
+    )
+    if valid_type_ids != set(type_ids):
+        raise ValueError("Rasm turi topilmadi yoki faol emas")
+
+    pool_images = {
+        image.id: image
+        for image in db.execute(
+            select(ClinicalImage).where(
+                ClinicalImage.id.in_(image_ids),
+                ClinicalImage.case_id == case.id,
+                ClinicalImage.image_type_id.is_(None),
+            )
+        ).scalars()
+    }
+    if set(pool_images) != set(image_ids):
+        raise ValueError("Tanlangan rasmlardan biri bulutda mavjud emas")
+
+    for image_type_id, image_id in assignments:
+        _place_image_in_slot(db, case, pool_images[image_id], image_type_id)
 
 
 async def auto_classify_pool_images(db: Session, case: TreatmentPlanCase, images: list[ClinicalImage]) -> None:

@@ -19,6 +19,7 @@ from app.integrations.cliniccards.factory import get_cliniccards_adapter
 from app.schemas.case import (
     AssignCaseRequest,
     AssignFromPoolRequest,
+    BatchAssignFromPoolRequest,
     AuditLogOut,
     CaseDetail,
     CaseListItem,
@@ -37,6 +38,7 @@ from app.security.deps import clinic_scope, get_current_user, require_admin, req
 from app.services.case_service import (
     assign_case,
     assign_pool_image_to_slot,
+    batch_assign_pool_images,
     auto_classify_pool_images,
     create_case_from_cliniccards_patient,
     create_manual_case,
@@ -434,6 +436,28 @@ def assign_from_pool_endpoint(
         assign_pool_image_to_slot(db, case, image_type_id, payload.pool_image_id)
     except ValueError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    db.commit()
+    return get_case(case_id, db, user)
+
+
+@router.post("/{case_id}/images/batch-assign", response_model=CaseDetail)
+def batch_assign_from_pool_endpoint(
+    case_id: uuid.UUID,
+    payload: BatchAssignFromPoolRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CaseDetail:
+    """Save the fast sorter's complete draft with one request."""
+    case = _get_case_or_404(db, case_id, user)
+    try:
+        batch_assign_pool_images(
+            db,
+            case,
+            [(item.image_type_id, item.pool_image_id) for item in payload.assignments],
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     db.commit()
     return get_case(case_id, db, user)
 

@@ -1,8 +1,10 @@
 import asyncio
+import io
 import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from PIL import Image, ImageOps
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -65,6 +67,55 @@ def _get_image_file_blocking(image_id: uuid.UUID, user: User) -> tuple[bytes, st
         db.close()
 
 
+def _make_thumbnail(data: bytes) -> bytes:
+    """Build a compact, correctly-oriented gallery image.
+
+    The original remains untouched for fullscreen review and presentation
+    export. 480px is deliberately larger than today's 104px tile so it also
+    stays crisp on high-DPI displays.
+    """
+    with Image.open(io.BytesIO(data)) as source:
+        image = ImageOps.exif_transpose(source)
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        image.thumbnail((480, 480), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        image.save(output, format="WEBP", quality=82, method=6)
+        return output.getvalue()
+
+
+def _get_image_thumbnail_blocking(image_id: uuid.UUID, user: User) -> tuple[bytes, str]:
+    db = SessionLocal()
+    try:
+        image = _get_image_or_404(db, image_id, user)
+        if image.thumbnail_data:
+            return image.thumbnail_data, image.thumbnail_mime_type or "image/webp"
+
+        data = image.file_data
+        if data is None and image.source == ImageSource.CLINICCARDS and image.external_url:
+            try:
+                data, mime_type = asyncio.run(get_cliniccards_adapter().download_file(image.external_url))
+            except (httpx.HTTPError, RuntimeError):
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Cliniccards rasmini yuklab bo'lmadi") from None
+            image.file_data = data
+            image.mime_type = mime_type
+            image.original_filename = image.external_url.rsplit("/", 1)[-1][:255] or "cliniccards-image"
+
+        if not data:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Rasm fayli topilmadi")
+
+        try:
+            thumbnail = _make_thumbnail(data)
+        except (OSError, ValueError):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Rasm formatini ochib bo'lmadi") from None
+        image.thumbnail_data = thumbnail
+        image.thumbnail_mime_type = "image/webp"
+        db.commit()
+        return thumbnail, "image/webp"
+    finally:
+        db.close()
+
+
 @router.get("/{image_id}/file")
 async def get_image_file(
     image_id: uuid.UUID,
@@ -72,6 +123,19 @@ async def get_image_file(
 ) -> Response:
     data, mime_type = await asyncio.to_thread(_get_image_file_blocking, image_id, user)
     return Response(content=data, media_type=mime_type, headers={"Cache-Control": "private, max-age=300"})
+
+
+@router.get("/{image_id}/thumbnail")
+async def get_image_thumbnail(
+    image_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+) -> Response:
+    data, mime_type = await asyncio.to_thread(_get_image_thumbnail_blocking, image_id, user)
+    return Response(
+        content=data,
+        media_type=mime_type,
+        headers={"Cache-Control": "private, max-age=86400, stale-while-revalidate=604800"},
+    )
 
 
 @router.get("/{image_id}/annotations", response_model=ImageAnnotationOut | None)

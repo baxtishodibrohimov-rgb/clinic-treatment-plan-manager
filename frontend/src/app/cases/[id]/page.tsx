@@ -6,7 +6,7 @@ import { Shell } from "@/components/shell";
 import { AuthenticatedImage } from "@/components/authenticated-image";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import type { AnalysisQuestionOut, CaseDetail, CaseStatus, ClinicalImageOut, UserOut } from "@/lib/types";
+import type { AnalysisQuestionOut, CaseDetail, CaseStatus, UserOut } from "@/lib/types";
 
 const CATEGORY_ORDER = ["intraoral", "extraoral", "radiology"] as const;
 const CATEGORY_LABELS: Record<string, string> = {
@@ -64,8 +64,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [uploadVersion, setUploadVersion] = useState(0);
   const [dragOverBulk, setDragOverBulk] = useState(false);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
-  const [poolPickerFor, setPoolPickerFor] = useState<string | null>(null);
   const [photoFullscreen, setPhotoFullscreen] = useState(false);
+  const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null);
+  const [draftAssignments, setDraftAssignments] = useState<Record<string, string>>({});
+  const [savingAssignments, setSavingAssignments] = useState(false);
 
   const load = async () => {
     const [detail, qs] = await Promise.all([
@@ -135,15 +137,32 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     }
   };
 
-  const onAssignFromPool = async (imageTypeId: string, poolImageId: string) => {
+  const choosePoolImage = (poolImageId: string) => {
+    if (!selectedTypeId || !data) return;
+    const nextDraft = { ...draftAssignments, [selectedTypeId]: poolImageId };
+    setDraftAssignments(nextDraft);
+
+    const currentIndex = data.image_types.findIndex((type) => type.id === selectedTypeId);
+    const ordered = [...data.image_types.slice(currentIndex + 1), ...data.image_types.slice(0, currentIndex + 1)];
+    const occupied = new Set([...data.images.map((image) => image.image_type_id), ...Object.keys(nextDraft)]);
+    const nextType = ordered.find((type) => type.is_required && !occupied.has(type.id));
+    setSelectedTypeId(nextType?.id ?? null);
+  };
+
+  const saveDraftAssignments = async () => {
+    const assignments = Object.entries(draftAssignments).map(([image_type_id, pool_image_id]) => ({ image_type_id, pool_image_id }));
+    if (assignments.length === 0) return;
+    setSavingAssignments(true);
     setError(null);
     try {
-      await api.post(`/api/cases/${id}/images/${imageTypeId}/assign-from-pool`, { pool_image_id: poolImageId });
-      await load();
-      setUploadVersion((v) => v + 1);
-      setPoolPickerFor(null);
+      const detail = await api.post<CaseDetail>(`/api/cases/${id}/images/batch-assign`, { assignments });
+      setData(detail);
+      setDraftAssignments({});
+      setSelectedTypeId(null);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Bulutdan biriktirishda xatolik");
+      setError(e instanceof ApiError ? e.message : "Rasmlarni saqlashda xatolik");
+    } finally {
+      setSavingAssignments(false);
     }
   };
 
@@ -167,7 +186,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
   const imagesByType = new Map(data.images.map((img) => [img.image_type_id, img]));
   const poolImages = data.pool_images ?? [];
-  const poolPickerType = poolPickerFor ? data.image_types.find((t) => t.id === poolPickerFor) : null;
+  const poolImagesById = new Map(poolImages.map((image) => [image.id, image]));
+  const draftedImageIds = new Set(Object.values(draftAssignments));
+  const visiblePoolImages = poolImages.filter((image) => !draftedImageIds.has(image.id));
+  const displayImagesByType = new Map(imagesByType);
+  Object.entries(draftAssignments).forEach(([typeId, imageId]) => {
+    const image = poolImagesById.get(imageId);
+    if (image) displayImagesByType.set(typeId, { ...image, image_type_id: typeId });
+  });
   const faceType = data.image_types.find((t) => t.code === "face_frontal");
   const faceImage = faceType ? imagesByType.get(faceType.id) : null;
 
@@ -214,8 +240,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               {faceImage && faceImage.external_url ? (
                 <AuthenticatedImage
                   key={`${faceImage.id}-${uploadVersion}`}
-                  src={faceImage.external_url}
+                  src={`${faceImage.external_url}?v=${uploadVersion}`}
                   alt={data.patient?.full_name ?? ""}
+                  thumbnail
                   className="h-full w-full object-cover"
                 />
               ) : (
@@ -302,27 +329,48 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             <div>
               <h2 className="font-medium text-ink">Diagnostik rasmlar</h2>
               <p className="text-xs text-muted">
-                &quot;Hammasini yuklash&quot; rasmlarni pastdagi <strong>bulutga</strong> tashlaydi. Har bir katak ostidagi{" "}
-                <strong>+</strong> tugmasi kompyuterdan to&apos;g&apos;ridan-to&apos;g&apos;ri yuklaydi, <strong>☁️</strong> tugmasi
-                esa bulutdagi rasmlardan birini shu joyga biriktiradi.
+                Chapdan kerakli joyni, keyin o&apos;ngdan mos rasmni bosing. Dastur avtomatik keyingi bo&apos;sh joyga o&apos;tadi;
+                hammasini oxirida bir marta saqlaysiz.
               </p>
             </div>
-            <label className="shrink-0 cursor-pointer rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover">
-              {uploading ? "Yuklanmoqda..." : "Hammasini yuklash (bulutga)"}
-              <input
-                ref={bulkInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                disabled={uploading}
-                onChange={(e) => onBulkUpload(e.target.files)}
-                className="hidden"
-              />
-            </label>
+            <div className="flex flex-wrap gap-2">
+              {Object.keys(draftAssignments).length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setDraftAssignments({}); setSelectedTypeId(null); }}
+                    className="rounded-md border border-divider px-3 py-2 text-sm text-body hover:bg-tag-neutral-bg"
+                  >
+                    Bekor qilish
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingAssignments}
+                    onClick={saveDraftAssignments}
+                    className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60"
+                  >
+                    {savingAssignments ? "Saqlanmoqda..." : `${Object.keys(draftAssignments).length} ta rasmni saqlash`}
+                  </button>
+                </>
+              )}
+              <label className="shrink-0 cursor-pointer rounded-md border border-accent px-3 py-2 text-sm font-medium text-accent hover:bg-tag-accent-bg">
+                {uploading ? "Yuklanmoqda..." : "Kompyuterdan rasmlar qo‘shish"}
+                <input
+                  ref={bulkInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  disabled={uploading}
+                  onChange={(e) => onBulkUpload(e.target.files)}
+                  className="hidden"
+                />
+              </label>
+            </div>
           </div>
 
           <input ref={singleInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => onSingleUpload(e.target.files)} />
-
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
+          <div className="space-y-4">
           {CATEGORY_ORDER.map((cat) => {
             const typesInCat = data.image_types.filter((t) => t.category === cat);
             if (typesInCat.length === 0) return null;
@@ -331,9 +379,17 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 <h3 className="text-sm font-medium text-ink">{CATEGORY_LABELS[cat] ?? cat}</h3>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
                   {typesInCat.map((t) => {
-                    const img = imagesByType.get(t.id);
+                    const img = displayImagesByType.get(t.id);
+                    const isSelected = selectedTypeId === t.id;
+                    const isDraft = Boolean(draftAssignments[t.id]);
                     return (
-                      <div key={t.id} className="space-y-1 rounded-md border border-divider p-2">
+                      <div
+                        key={t.id}
+                        onClick={() => setSelectedTypeId(t.id)}
+                        className={`cursor-pointer space-y-1 rounded-md border p-2 transition ${
+                          isSelected ? "border-accent bg-tag-accent-bg ring-2 ring-accent/20" : "border-divider hover:border-accent"
+                        }`}
+                      >
                         <div
                           onDragOver={(e) => {
                             if (!isImageDrag(e)) return;
@@ -358,8 +414,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           {img && img.external_url ? (
                             <AuthenticatedImage
                               key={`${img.id}-${uploadVersion}`}
-                              src={img.external_url}
+                              src={`${img.external_url}?v=${uploadVersion}`}
                               alt={t.label}
+                              thumbnail
                               className="h-full w-full object-cover"
                             />
                           ) : (
@@ -370,7 +427,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                         {t.is_required && !img && (
                           <span className="inline-block rounded bg-status-other-bg px-1.5 py-0.5 text-[10px] text-status-other">Majburiy</span>
                         )}
-                        {img && <span className="inline-block rounded bg-tag-neutral-bg px-1.5 py-0.5 text-[10px] text-tag-neutral-text">Bor</span>}
+                        {img && <span className="inline-block rounded bg-tag-neutral-bg px-1.5 py-0.5 text-[10px] text-tag-neutral-text">{isDraft ? "Tanlandi" : "Bor"}</span>}
                         <div className="flex gap-1 pt-1">
                           <button
                             type="button"
@@ -385,8 +442,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           </button>
                           <button
                             type="button"
-                            title="Bulutdan tanlash"
-                            onClick={() => setPoolPickerFor(t.id)}
+                            title="O‘ng tomondan rasm tanlash"
+                            onClick={(event) => { event.stopPropagation(); setSelectedTypeId(t.id); }}
                             className="flex h-7 w-7 items-center justify-center rounded border border-divider text-sm hover:bg-tag-neutral-bg"
                           >
                             ☁️
@@ -399,22 +456,33 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             );
           })}
+          </div>
 
-          <div className="space-y-2 border-t border-divider pt-3">
-            <h3 className="text-sm font-medium text-ink">☁️ Bulut ({poolImages.length})</h3>
-            {poolImages.length === 0 ? (
+          <div className="space-y-2 rounded-lg border border-divider bg-tag-neutral-bg/40 p-3 xl:sticky xl:top-4 xl:max-h-[78vh] xl:overflow-y-auto">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-medium text-ink">Clinic Cards rasmlari ({visiblePoolImages.length})</h3>
+              <span className="text-xs text-muted">{selectedTypeId ? "Rasmni bosing" : "Avval chapdan joy tanlang"}</span>
+            </div>
+            {visiblePoolImages.length === 0 ? (
               <p className="text-xs text-muted">Bulutda rasm yo&apos;q — &quot;Hammasini yuklash&quot; orqali qo&apos;shing.</p>
             ) : (
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
-                {poolImages.map((p) => (
-                  <div key={p.id} className="aspect-square overflow-hidden rounded border border-divider bg-tag-neutral-bg">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-3">
+                {visiblePoolImages.map((p) => (
+                  <button
+                    type="button"
+                    disabled={!selectedTypeId}
+                    onClick={() => choosePoolImage(p.id)}
+                    key={p.id}
+                    className="aspect-square overflow-hidden rounded border border-divider bg-tag-neutral-bg transition hover:border-accent hover:ring-2 hover:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
                     {p.external_url && (
-                      <AuthenticatedImage key={`${p.id}-${uploadVersion}`} src={p.external_url} alt="bulut" className="h-full w-full object-cover" />
+                      <AuthenticatedImage src={p.external_url} alt="Clinic Cards rasmi" thumbnail className="h-full w-full object-cover" />
                     )}
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
+          </div>
           </div>
         </div>
 
@@ -468,37 +536,10 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           className="fixed inset-0 z-[1000] flex items-center justify-center p-5"
           style={{ background: "rgba(22,36,28,0.92)" }}
         >
-          <AuthenticatedImage src={faceImage.external_url} alt={data.patient?.full_name ?? ""} className="max-h-full max-w-full object-contain" />
+          <AuthenticatedImage src={`${faceImage.external_url}?v=${uploadVersion}`} alt={data.patient?.full_name ?? ""} className="max-h-full max-w-full object-contain" />
         </div>
       )}
 
-      {poolPickerFor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPoolPickerFor(null)}>
-          <div className="w-full max-w-lg space-y-3 rounded-lg bg-surface p-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium text-ink">Bulutdan tanlang — {poolPickerType?.label}</h3>
-              <button onClick={() => setPoolPickerFor(null)} className="text-muted hover:text-ink">
-                ✕
-              </button>
-            </div>
-            {poolImages.length === 0 ? (
-              <p className="text-sm text-muted">Bulut bo&apos;sh</p>
-            ) : (
-              <div className="grid grid-cols-4 gap-2">
-                {poolImages.map((p: ClinicalImageOut) => (
-                  <button
-                    key={p.id}
-                    onClick={() => onAssignFromPool(poolPickerFor, p.id)}
-                    className="aspect-square overflow-hidden rounded border border-divider bg-tag-neutral-bg hover:border-accent"
-                  >
-                    {p.external_url && <AuthenticatedImage src={p.external_url} alt="bulut" className="h-full w-full object-cover" />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </Shell>
   );
 }

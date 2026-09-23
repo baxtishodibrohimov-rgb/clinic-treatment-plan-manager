@@ -29,6 +29,12 @@ def purge_old_images(db: Session, retention_days: int) -> int:
         update(ClinicalImage)
         .where(ClinicalImage.case_id.in_(old_case_ids))
         .where(ClinicalImage.file_data.is_not(None))
-        .values(file_data=None, mime_type=None, original_filename=None)
+        .values(
+            file_data=None,
+            thumbnail_data=None,
+            thumbnail_mime_type=None,
+            mime_type=None,
+            original_filename=None,
+        )
     )
     return result.rowcount

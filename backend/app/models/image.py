@@ -45,6 +45,10 @@ class ClinicalImage(Base, UUIDPKMixin):
     # in Postgres. For larger long-term volume this should move to object
     # storage (S3/R2), while keeping the same authenticated API endpoint.
     file_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Small gallery derivative. Keeping it separately prevents a 104px tile
+    # from transferring and decoding a 20+ megapixel original on every view.
+    thumbnail_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    thumbnail_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

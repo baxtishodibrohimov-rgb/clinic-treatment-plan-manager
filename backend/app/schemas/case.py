@@ -88,6 +88,15 @@ class AssignFromPoolRequest(BaseModel):
     pool_image_id: uuid.UUID
 
 
+class ImageAssignment(BaseModel):
+    image_type_id: uuid.UUID
+    pool_image_id: uuid.UUID
+
+
+class BatchAssignFromPoolRequest(BaseModel):
+    assignments: list[ImageAssignment]
+
+
 class AssignCaseRequest(BaseModel):
     planner_user_id: uuid.UUID
     note: str | None = None

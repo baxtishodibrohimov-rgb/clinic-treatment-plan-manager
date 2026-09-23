@@ -386,7 +386,7 @@ function PatientCard({ item, faceTypeId, onPhotoUploaded }: { item: CaseListItem
         className="flex h-40 w-full items-center justify-center bg-tag-neutral-bg"
       >
         {item.face_photo_url ? (
-          <AuthenticatedImage src={item.face_photo_url} alt={item.patient_name} className="h-full w-full object-cover" />
+          <AuthenticatedImage src={item.face_photo_url} alt={item.patient_name} thumbnail className="h-full w-full object-cover" />
         ) : (
           <span className="text-xs text-muted">{uploading ? "Yuklanmoqda..." : "+ Rasm"}</span>
         )}
