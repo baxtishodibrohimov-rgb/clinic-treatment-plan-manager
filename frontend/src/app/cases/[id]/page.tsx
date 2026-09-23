@@ -458,7 +458,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           })}
           </div>
 
-          <div className="space-y-2 rounded-lg border border-divider bg-tag-neutral-bg/40 p-3 xl:sticky xl:top-4 xl:max-h-[78vh] xl:overflow-y-auto">
+          <div className="space-y-2 rounded-lg border border-divider bg-tag-neutral-bg/40 p-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start xl:overflow-y-auto">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-medium text-ink">Clinic Cards rasmlari ({visiblePoolImages.length})</h3>
               <span className="text-xs text-muted">{selectedTypeId ? "Rasmni bosing" : "Avval chapdan joy tanlang"}</span>

@@ -113,7 +113,10 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-surface">
       {!hideNav && <TopNav />}
-      <main className="min-w-0 overflow-x-hidden p-6">{children}</main>
+      {/* `hidden` creates a scroll container and breaks descendants using
+          position: sticky. `clip` still prevents horizontal spill without
+          stealing the page's vertical scroll context. */}
+      <main className="min-w-0 overflow-x-clip p-6">{children}</main>
     </div>
   );
 }
