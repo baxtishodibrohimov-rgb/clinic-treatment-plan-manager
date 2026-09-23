@@ -7,16 +7,11 @@ import { AuthenticatedImage } from "@/components/authenticated-image";
 import { api, ApiError } from "@/lib/api";
 import { onScopeClinicChange, withClinicScope } from "@/lib/clinic-scope";
 import { useAuth } from "@/lib/auth-context";
-import type { CaseListItem, CaseStatus, ClinicOut, DoctorOut, ImageTypeOut } from "@/lib/types";
+import type { CaseListItem, CaseStatus, ClinicOut, ImageTypeOut } from "@/lib/types";
 
 function toLocalDateValue(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function toLocalDatetimeInputValue(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${toLocalDateValue(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function addDays(date: Date, days: number): Date {
@@ -142,31 +137,22 @@ function statusBg(status: CaseStatus): string {
 
 function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { isSuperAdmin } = useAuth();
-  const [mode, setMode] = useState<"manual" | "by_card">("by_card");
-  const [doctors, setDoctors] = useState<DoctorOut[]>([]);
   const [clinics, setClinics] = useState<ClinicOut[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    full_name: "",
-    birth_date: "",
-    phone: "",
     cliniccards_patient_id: "",
-    doctor_name: "",
-    consultation_datetime: toLocalDatetimeInputValue(new Date()),
-    priority: "normal",
     clinic_id: "",
   });
 
   useEffect(() => {
-    api
-      .get<DoctorOut[]>("/api/cases/doctors")
-      .then(setDoctors)
-      .catch(() => {});
     if (isSuperAdmin) {
       api
         .get<ClinicOut[]>("/api/clinics")
-        .then(setClinics)
+        .then((items) => {
+          setClinics(items);
+          if (items.length === 1) setForm((current) => ({ ...current, clinic_id: items[0].id }));
+        })
         .catch(() => {});
     }
   }, [isSuperAdmin]);
@@ -174,27 +160,19 @@ function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!form.cliniccards_patient_id.trim()) {
+      setError("Clinic Cards karta raqamini kiriting");
+      return;
+    }
     setSaving(true);
     try {
-      if (mode === "by_card") {
-        await api.post("/api/cases/manual/by-cliniccards-id", {
-          cliniccards_patient_id: form.cliniccards_patient_id,
-          doctor_name: form.doctor_name || null,
-          consultation_datetime: new Date(form.consultation_datetime).toISOString(),
-          priority: form.priority,
-          clinic_id: form.clinic_id || null,
-        });
-      } else {
-        await api.post("/api/cases/manual", {
-          full_name: form.full_name,
-          birth_date: form.birth_date || null,
-          phone: form.phone || null,
-          doctor_name: form.doctor_name || null,
-          consultation_datetime: new Date(form.consultation_datetime).toISOString(),
-          priority: form.priority,
-          clinic_id: form.clinic_id || null,
-        });
-      }
+      await api.post("/api/cases/manual/by-cliniccards-id", {
+        cliniccards_patient_id: form.cliniccards_patient_id.trim(),
+        doctor_name: null,
+        consultation_datetime: new Date().toISOString(),
+        priority: "normal",
+        clinic_id: form.clinic_id || null,
+      });
       onCreated();
       onClose();
     } catch (e) {
@@ -208,123 +186,30 @@ function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreate
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <form onSubmit={submit} className="w-full max-w-md space-y-3 rounded-lg bg-surface p-5 shadow-lg">
         <div className="flex items-center justify-between">
-          <h2 className="font-heading text-lg font-medium">Yangi bemor / case</h2>
+          <h2 className="font-heading text-lg font-medium">Ikkinchi konsultatsiya</h2>
           <button type="button" onClick={onClose} className="text-muted hover:text-ink">
             ✕
           </button>
         </div>
 
-        <div className="flex rounded-md border border-divider p-0.5 text-sm">
-          <button
-            type="button"
-            onClick={() => setMode("by_card")}
-            className={`flex-1 rounded px-3 py-1.5 ${mode === "by_card" ? "bg-accent text-white" : "text-muted"}`}
-          >
-            Karta raqami orqali
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("manual")}
-            className={`flex-1 rounded px-3 py-1.5 ${mode === "manual" ? "bg-accent text-white" : "text-muted"}`}
-          >
-            Qo&apos;lda kiritish
-          </button>
-        </div>
-
         {error && <div className="rounded-md bg-status-other-bg px-3 py-2 text-sm text-status-other">{error}</div>}
 
-        {mode === "by_card" ? (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted">Cliniccards karta raqami *</label>
-            <input
-              required
-              value={form.cliniccards_patient_id}
-              onChange={(e) => setForm({ ...form, cliniccards_patient_id: e.target.value })}
-              placeholder="masalan CC-1042"
-              className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-            />
-            <p className="text-xs text-muted">
-              F.I.Sh, tug&apos;ilgan sana, telefon va mavjud rasmlar Cliniccardsdan avtomatik olinadi.
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted">F.I.Sh *</label>
-              <input
-                required
-                value={form.full_name}
-                onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-                className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted">Tug&apos;ilgan sana</label>
-                <input
-                  type="date"
-                  value={form.birth_date}
-                  onChange={(e) => setForm({ ...form, birth_date: e.target.value })}
-                  className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted">Telefon</label>
-                <input
-                  value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  placeholder="+998..."
-                  className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-          </>
-        )}
-
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted">Shifokor</label>
-          <select
-            value={form.doctor_name}
-            onChange={(e) => setForm({ ...form, doctor_name: e.target.value })}
-            className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-          >
-            <option value="">— tanlanmagan —</option>
-            {doctors.map((d) => (
-              <option key={d.id} value={d.full_name}>
-                {d.full_name}
-              </option>
-            ))}
-          </select>
+          <label className="text-xs font-medium text-muted">Clinic Cards karta raqami *</label>
+          <input
+            required
+            autoFocus
+            value={form.cliniccards_patient_id}
+            onChange={(e) => setForm({ ...form, cliniccards_patient_id: e.target.value })}
+            placeholder="Masalan: 001, 1024 yoki CC-1042"
+            className="w-full rounded-md border border-divider px-3 py-2.5 text-base"
+          />
+          <p className="text-xs text-muted">
+            Bemorning F.I.Sh, tug&apos;ilgan sanasi, telefoni va rasmlari Clinic Cards&apos;dan avtomatik olinadi.
+          </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted">2-konsultatsiya vaqti *</label>
-            <input
-              required
-              type="datetime-local"
-              value={form.consultation_datetime}
-              onChange={(e) => setForm({ ...form, consultation_datetime: e.target.value })}
-              className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted">Muhimlik</label>
-            <select
-              value={form.priority}
-              onChange={(e) => setForm({ ...form, priority: e.target.value })}
-              className="w-full rounded-md border border-divider px-3 py-2 text-sm"
-            >
-              <option value="low">Past</option>
-              <option value="normal">Oddiy</option>
-              <option value="high">Yuqori</option>
-              <option value="urgent">Shoshilinch</option>
-            </select>
-          </div>
-        </div>
-
-        {isSuperAdmin && (
+        {isSuperAdmin && clinics.length > 1 && (
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted">Filial *</label>
             <select
@@ -345,10 +230,10 @@ function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreate
 
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || (isSuperAdmin && !form.clinic_id)}
           className="w-full rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
         >
-          {saving ? "..." : "Yaratish"}
+          {saving ? "Bemor yuklanmoqda..." : "Bemorni yuklash"}
         </button>
       </form>
     </div>
