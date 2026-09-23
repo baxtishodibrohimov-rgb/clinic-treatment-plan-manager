@@ -353,7 +353,23 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
             </div>
           </div>
 
-          <div className="p-4 pt-3" style={{ background: "rgba(18,36,26,0.92)" }}>
+          <div className="max-h-[48vh] overflow-y-auto p-4 pt-3" style={{ background: "rgba(18,36,26,0.92)" }}>
+            {dentalChartJaw && chart && (
+              <div className="mb-3 space-y-2 rounded-lg border border-white/20 bg-white/95 p-3">
+                <h2 className="text-sm font-medium text-ink">
+                  Tish formulasi (FDI) — {dentalChartJaw === "upper" ? "yuqori jag'" : "pastki jag'"}
+                </h2>
+                <div className="overflow-x-auto">
+                  <DentalChart
+                    chart={chart}
+                    onClick={clickTooth}
+                    onReset={resetChart}
+                    jaw={dentalChartJaw}
+                    showReset={dentalChartJaw === "upper"}
+                  />
+                </div>
+              </div>
+            )}
             {currentQuestion ? (
               <QuestionField q={currentQuestion} onSave={saveAnswer} dark />
             ) : (
