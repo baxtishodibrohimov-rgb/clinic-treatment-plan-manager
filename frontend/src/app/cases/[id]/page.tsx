@@ -64,7 +64,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [uploadVersion, setUploadVersion] = useState(0);
   const [dragOverBulk, setDragOverBulk] = useState(false);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
-  const [photoFullscreen, setPhotoFullscreen] = useState(false);
+  const [fullscreenImage, setFullscreenImage] = useState<{ src: string; alt: string } | null>(null);
+  const [sorterOpen, setSorterOpen] = useState(false);
   const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null);
   const [draftAssignments, setDraftAssignments] = useState<Record<string, string>>({});
   const [savingAssignments, setSavingAssignments] = useState(false);
@@ -159,11 +160,26 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setData(detail);
       setDraftAssignments({});
       setSelectedTypeId(null);
+      setSorterOpen(false);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Rasmlarni saqlashda xatolik");
     } finally {
       setSavingAssignments(false);
     }
+  };
+
+  const openSorter = (typeId?: string) => {
+    const firstEmptyRequired = data?.image_types.find(
+      (type) => type.is_required && !data.images.some((image) => image.image_type_id === type.id),
+    );
+    setSelectedTypeId(typeId ?? firstEmptyRequired?.id ?? data?.image_types[0]?.id ?? null);
+    setSorterOpen(true);
+  };
+
+  const closeSorter = () => {
+    setDraftAssignments({});
+    setSelectedTypeId(null);
+    setSorterOpen(false);
   };
 
   const isImageDrag = (e: React.DragEvent) => Array.from(e.dataTransfer.items || []).some((it) => it.kind === "file");
@@ -254,7 +270,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPhotoFullscreen(true);
+                  setFullscreenImage({ src: `${faceImage.external_url}?v=${uploadVersion}`, alt: data.patient?.full_name ?? "" });
                 }}
                 title="To'liq ekran"
                 className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-md border border-white/60 bg-black/45 text-sm text-white"
@@ -334,25 +350,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {Object.keys(draftAssignments).length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => { setDraftAssignments({}); setSelectedTypeId(null); }}
-                    className="rounded-md border border-divider px-3 py-2 text-sm text-body hover:bg-tag-neutral-bg"
-                  >
-                    Bekor qilish
-                  </button>
-                  <button
-                    type="button"
-                    disabled={savingAssignments}
-                    onClick={saveDraftAssignments}
-                    className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60"
-                  >
-                    {savingAssignments ? "Saqlanmoqda..." : `${Object.keys(draftAssignments).length} ta rasmni saqlash`}
-                  </button>
-                </>
-              )}
+              <button
+                type="button"
+                onClick={() => openSorter()}
+                className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+              >
+                Clinic Cards rasmlarini joylash
+              </button>
               <label className="shrink-0 cursor-pointer rounded-md border border-accent px-3 py-2 text-sm font-medium text-accent hover:bg-tag-accent-bg">
                 {uploading ? "Yuklanmoqda..." : "Kompyuterdan rasmlar qo‘shish"}
                 <input
@@ -369,7 +373,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           </div>
 
           <input ref={singleInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => onSingleUpload(e.target.files)} />
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
           <div className="space-y-4">
           {CATEGORY_ORDER.map((cat) => {
             const typesInCat = data.image_types.filter((t) => t.category === cat);
@@ -385,12 +388,16 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     return (
                       <div
                         key={t.id}
-                        onClick={() => setSelectedTypeId(t.id)}
-                        className={`cursor-pointer space-y-1 rounded-md border p-2 transition ${
+                        className={`space-y-1 rounded-md border p-2 transition ${
                           isSelected ? "border-accent bg-tag-accent-bg ring-2 ring-accent/20" : "border-divider hover:border-accent"
                         }`}
                       >
                         <div
+                          title={img ? "Kattalashtirish uchun ikki marta bosing" : undefined}
+                          onDoubleClick={(event) => {
+                            event.stopPropagation();
+                            if (img?.external_url) setFullscreenImage({ src: `${img.external_url}?v=${uploadVersion}`, alt: t.label });
+                          }}
                           onDragOver={(e) => {
                             if (!isImageDrag(e)) return;
                             e.preventDefault();
@@ -443,7 +450,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           <button
                             type="button"
                             title="O‘ng tomondan rasm tanlash"
-                            onClick={(event) => { event.stopPropagation(); setSelectedTypeId(t.id); }}
+                            onClick={(event) => { event.stopPropagation(); openSorter(t.id); }}
                             className="flex h-7 w-7 items-center justify-center rounded border border-divider text-sm hover:bg-tag-neutral-bg"
                           >
                             ☁️
@@ -456,33 +463,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               </div>
             );
           })}
-          </div>
-
-          <div className="space-y-2 rounded-lg border border-divider bg-tag-neutral-bg/40 p-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start xl:overflow-y-auto">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-medium text-ink">Clinic Cards rasmlari ({visiblePoolImages.length})</h3>
-              <span className="text-xs text-muted">{selectedTypeId ? "Rasmni bosing" : "Avval chapdan joy tanlang"}</span>
-            </div>
-            {visiblePoolImages.length === 0 ? (
-              <p className="text-xs text-muted">Bulutda rasm yo&apos;q — &quot;Hammasini yuklash&quot; orqali qo&apos;shing.</p>
-            ) : (
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-3">
-                {visiblePoolImages.map((p) => (
-                  <button
-                    type="button"
-                    disabled={!selectedTypeId}
-                    onClick={() => choosePoolImage(p.id)}
-                    key={p.id}
-                    className="aspect-square overflow-hidden rounded border border-divider bg-tag-neutral-bg transition hover:border-accent hover:ring-2 hover:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {p.external_url && (
-                      <AuthenticatedImage src={p.external_url} alt="Clinic Cards rasmi" thumbnail className="h-full w-full object-cover" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
           </div>
         </div>
 
@@ -530,13 +510,115 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </div>
       </div>
 
-      {photoFullscreen && faceImage && faceImage.external_url && (
+      {sorterOpen && (
+        <div className="fixed inset-0 z-[900] bg-black/55 p-2 sm:p-4">
+          <div className="mx-auto flex h-full w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-surface shadow-2xl">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-divider px-4 py-3">
+              <div>
+                <h2 className="font-medium text-ink">Clinic Cards rasmlarini joylash</h2>
+                <p className="text-xs text-muted">Chapdan joyni, keyin o&apos;ngdan rasmni bosing. Keyingi bo&apos;sh joy avtomatik tanlanadi.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted">{Object.keys(draftAssignments).length} ta tanlandi</span>
+                <button
+                  type="button"
+                  onClick={closeSorter}
+                  className="rounded-md border border-divider px-3 py-2 text-sm text-body hover:bg-tag-neutral-bg"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="button"
+                  disabled={savingAssignments || Object.keys(draftAssignments).length === 0}
+                  onClick={saveDraftAssignments}
+                  className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+                >
+                  {savingAssignments ? "Saqlanmoqda..." : "Saqlash"}
+                </button>
+                <button
+                  type="button"
+                  aria-label="Yopish"
+                  onClick={closeSorter}
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-divider text-lg text-muted hover:bg-tag-neutral-bg hover:text-ink"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-3 lg:grid-cols-[minmax(300px,2fr)_minmax(360px,3fr)] lg:overflow-hidden sm:p-4">
+              <div className="space-y-3 lg:overflow-y-auto lg:pr-1">
+                {CATEGORY_ORDER.map((category) => {
+                  const types = data.image_types.filter((type) => type.category === category);
+                  if (types.length === 0) return null;
+                  return (
+                    <div key={category} className="space-y-2">
+                      <h3 className="text-sm font-medium text-ink">{CATEGORY_LABELS[category] ?? category}</h3>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+                        {types.map((type) => {
+                          const image = displayImagesByType.get(type.id);
+                          const selected = selectedTypeId === type.id;
+                          return (
+                            <button
+                              type="button"
+                              key={type.id}
+                              onClick={() => setSelectedTypeId(type.id)}
+                              className={`overflow-hidden rounded-lg border p-1.5 text-left transition ${
+                                selected ? "border-accent bg-tag-accent-bg ring-2 ring-accent/20" : "border-divider hover:border-accent"
+                              }`}
+                            >
+                              <div className="aspect-square overflow-hidden rounded bg-tag-neutral-bg">
+                                {image?.external_url ? (
+                                  <AuthenticatedImage src={`${image.external_url}?v=${uploadVersion}`} alt={type.label} thumbnail className="h-full w-full object-cover" />
+                                ) : (
+                                  <span className="flex h-full items-center justify-center text-xs text-muted">Bo&apos;sh</span>
+                                )}
+                              </div>
+                              <div className="mt-1 truncate text-xs font-medium text-ink">{type.label}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-divider bg-tag-neutral-bg/40 p-3 lg:overflow-y-auto">
+                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-surface/95 py-1 backdrop-blur">
+                  <h3 className="text-sm font-medium text-ink">Barcha rasmlar ({visiblePoolImages.length})</h3>
+                  <span className="text-xs text-muted">{selectedTypeId ? "Rasmni bir marta bosing" : "Avval chapdan joy tanlang"}</span>
+                </div>
+                {visiblePoolImages.length === 0 ? (
+                  <p className="text-sm text-muted">Joylashtirilmagan rasm qolmadi.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+                    {visiblePoolImages.map((image) => (
+                      <button
+                        type="button"
+                        disabled={!selectedTypeId}
+                        onClick={() => choosePoolImage(image.id)}
+                        key={image.id}
+                        className="aspect-square overflow-hidden rounded border border-divider bg-tag-neutral-bg transition hover:border-accent hover:ring-2 hover:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {image.external_url && <AuthenticatedImage src={image.external_url} alt="Clinic Cards rasmi" thumbnail className="h-full w-full object-cover" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fullscreenImage && (
         <div
-          onClick={() => setPhotoFullscreen(false)}
+          onClick={() => setFullscreenImage(null)}
           className="fixed inset-0 z-[1000] flex items-center justify-center p-5"
           style={{ background: "rgba(22,36,28,0.92)" }}
         >
-          <AuthenticatedImage src={`${faceImage.external_url}?v=${uploadVersion}`} alt={data.patient?.full_name ?? ""} className="max-h-full max-w-full object-contain" />
+          <AuthenticatedImage src={fullscreenImage.src} alt={fullscreenImage.alt} className="max-h-full max-w-full object-contain" />
         </div>
       )}
 
