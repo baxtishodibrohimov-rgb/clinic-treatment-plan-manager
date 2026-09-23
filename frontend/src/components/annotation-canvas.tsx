@@ -41,6 +41,7 @@ export function AnnotationCanvas({
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const [resizing, setResizing] = useState(false);
   const [moving, setMoving] = useState<{ startPt: { x: number; y: number }; orig: Mark } | null>(null);
+  const [selectedMarkIndex, setSelectedMarkIndex] = useState<number | null>(null);
   const [selectedArrowIndex, setSelectedArrowIndex] = useState<number | null>(null);
   const [arrowDrag, setArrowDrag] = useState<{
     index: number;
@@ -49,13 +50,15 @@ export function AnnotationCanvas({
     orig: Arrow;
   } | null>(null);
 
-  const { mark: committedMark, arrows } = splitMarks(marks);
+  const { marks: committedMarks, arrows } = splitMarks(marks);
   // During resize/move we redraw every mousemove but only tell the parent
   // (which PUTs a new versioned DB row per call) once, on mouseup — else a
   // single drag would write dozens of rows.
   const [liveMark, setLiveMark] = useState<Mark | null>(null);
   const [liveArrows, setLiveArrows] = useState<Arrow[] | null>(null);
+  const committedMark = selectedMarkIndex === null ? null : committedMarks[selectedMarkIndex] ?? null;
   const mark = liveMark ?? committedMark;
+  const displayedMarks = committedMarks.map((item, index) => (index === selectedMarkIndex && liveMark ? liveMark : item));
   const displayedArrows = liveArrows ?? arrows;
 
   useEffect(() => {
@@ -76,7 +79,10 @@ export function AnnotationCanvas({
       setResizing(false);
       setMoving(null);
       setLiveMark((m) => {
-        if (m) onChange?.([m, ...arrows]);
+        if (m && selectedMarkIndex !== null) {
+          const nextMarks = committedMarks.map((item, index) => (index === selectedMarkIndex ? m : item));
+          onChange?.([...nextMarks, ...arrows]);
+        }
         return null;
       });
     };
@@ -87,7 +93,7 @@ export function AnnotationCanvas({
       window.removeEventListener("mouseup", onUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resizing, moving]);
+  }, [resizing, moving, selectedMarkIndex]);
 
   useEffect(() => {
     if (!arrowDrag) return;
@@ -114,7 +120,7 @@ export function AnnotationCanvas({
     const onUp = () => {
       setArrowDrag(null);
       setLiveArrows((next) => {
-        if (next) onChange?.([...(mark ? [mark] : []), ...next]);
+        if (next) onChange?.([...displayedMarks, ...next]);
         return null;
       });
     };
@@ -163,21 +169,25 @@ export function AnnotationCanvas({
         width,
         shape: ovalVariant,
       };
-      onChange?.([next, ...arrows]);
+      onChange?.([...committedMarks, next, ...arrows]);
+      setSelectedMarkIndex(committedMarks.length);
+      setSelectedArrowIndex(null);
     } else if (dist >= 1) {
       const next: Arrow = { kind: "arrow", x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width, shape: tool };
-      onChange?.([...(mark ? [mark] : []), ...arrows, next]);
+      onChange?.([...committedMarks, ...arrows, next]);
+      setSelectedArrowIndex(arrows.length);
+      setSelectedMarkIndex(null);
     }
     setTool(null);
   };
 
-  const cycleMarkWidth = () => {
-    if (!mark) return;
-    onChange?.([{ ...mark, width: nextWidth(mark.width) }, ...arrows]);
+  const cycleMarkWidth = (idx: number) => {
+    const nextMarks = committedMarks.map((item, index) => (index === idx ? { ...item, width: nextWidth(item.width) } : item));
+    onChange?.([...nextMarks, ...arrows]);
   };
   const cycleArrowWidth = (idx: number) => {
     const next = arrows.map((a, i) => (i === idx ? { ...a, width: nextWidth(a.width) } : a));
-    onChange?.([...(mark ? [mark] : []), ...next]);
+    onChange?.([...committedMarks, ...next]);
   };
   const startResize = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -198,19 +208,28 @@ export function AnnotationCanvas({
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTool(null);
+    setSelectedMarkIndex(null);
     setSelectedArrowIndex(index);
     setArrowDrag({ index, mode, startPt: pct(e.clientX, e.clientY, rect), orig: arrows[index] });
   };
   const clearAll = () => {
+    setSelectedMarkIndex(null);
     setSelectedArrowIndex(null);
     setTool(null);
     onChange?.([]);
   };
+  const deleteSelected = () => {
+    if (selectedMarkIndex !== null) {
+      onChange?.([...committedMarks.filter((_, index) => index !== selectedMarkIndex), ...arrows]);
+      setSelectedMarkIndex(null);
+      return;
+    }
+    if (selectedArrowIndex !== null) {
+      onChange?.([...committedMarks, ...arrows.filter((_, index) => index !== selectedArrowIndex)]);
+      setSelectedArrowIndex(null);
+    }
+  };
 
-  const markCx = mark ? (mark.x1 + mark.x2) / 2 : 50;
-  const markCy = mark ? (mark.y1 + mark.y2) / 2 : 50;
-  const markRx = mark ? Math.max(3, Math.abs(mark.x2 - mark.x1) / 2) : 10;
-  const markRy = mark ? Math.max(3, Math.abs(mark.y2 - mark.y1) / 2) : 8;
   const markX = mark ? Math.min(mark.x1, mark.x2) : 0;
   const markY = mark ? Math.min(mark.y1, mark.y2) : 0;
   const markW = mark ? Math.abs(mark.x2 - mark.x1) : 0;
@@ -248,35 +267,47 @@ export function AnnotationCanvas({
           ))}
         </defs>
 
-        {mark && (
-          <>
-            {mark.shape === "rect" ? (
+        {displayedMarks.map((drawnMark, index) => {
+          const cx = (drawnMark.x1 + drawnMark.x2) / 2;
+          const cy = (drawnMark.y1 + drawnMark.y2) / 2;
+          const rx = Math.max(3, Math.abs(drawnMark.x2 - drawnMark.x1) / 2);
+          const ry = Math.max(3, Math.abs(drawnMark.y2 - drawnMark.y1) / 2);
+          const x = Math.min(drawnMark.x1, drawnMark.x2);
+          const y = Math.min(drawnMark.y1, drawnMark.y2);
+          const w = Math.abs(drawnMark.x2 - drawnMark.x1);
+          const h = Math.abs(drawnMark.y2 - drawnMark.y1);
+          return (
+          <g key={`mark-${index}`}>
+            {drawnMark.shape === "rect" ? (
               <rect
-                x={`${markX}%`}
-                y={`${markY}%`}
-                width={`${markW}%`}
-                height={`${markH}%`}
+                x={`${x}%`}
+                y={`${y}%`}
+                width={`${w}%`}
+                height={`${h}%`}
                 fill="none"
-                stroke={COLOR_HEX[mark.color]}
-                strokeWidth={mark.width}
-                onDoubleClick={editable ? cycleMarkWidth : undefined}
+                stroke={COLOR_HEX[drawnMark.color]}
+                strokeWidth={drawnMark.width}
+                onClick={editable ? () => { setTool(null); setSelectedArrowIndex(null); setSelectedMarkIndex(index); } : undefined}
+                onDoubleClick={editable ? () => cycleMarkWidth(index) : undefined}
                 style={editable ? { pointerEvents: "auto", cursor: "pointer" } : undefined}
               />
             ) : (
               <ellipse
-                cx={`${markCx}%`}
-                cy={`${markCy}%`}
-                rx={`${markRx}%`}
-                ry={`${markRy}%`}
+                cx={`${cx}%`}
+                cy={`${cy}%`}
+                rx={`${rx}%`}
+                ry={`${ry}%`}
                 fill="none"
-                stroke={COLOR_HEX[mark.color]}
-                strokeWidth={mark.width}
-                onDoubleClick={editable ? cycleMarkWidth : undefined}
+                stroke={COLOR_HEX[drawnMark.color]}
+                strokeWidth={drawnMark.width}
+                onClick={editable ? () => { setTool(null); setSelectedArrowIndex(null); setSelectedMarkIndex(index); } : undefined}
+                onDoubleClick={editable ? () => cycleMarkWidth(index) : undefined}
                 style={editable ? { pointerEvents: "auto", cursor: "pointer" } : undefined}
               />
             )}
-          </>
-        )}
+          </g>
+          );
+        })}
 
         {displayedArrows.map((a, i) => (
           <g key={i}>
@@ -289,7 +320,7 @@ export function AnnotationCanvas({
               strokeWidth={a.width}
               markerEnd={a.shape === "arrow" ? `url(#${MARKER_PREFIX}-${idSalt}-${a.color})` : undefined}
               onDoubleClick={editable ? () => cycleArrowWidth(i) : undefined}
-              onClick={editable ? () => { setTool(null); setSelectedArrowIndex(i); } : undefined}
+              onClick={editable ? () => { setTool(null); setSelectedMarkIndex(null); setSelectedArrowIndex(i); } : undefined}
               style={editable ? { pointerEvents: "auto", cursor: "move" } : undefined}
             />
             {editable && (
@@ -301,7 +332,7 @@ export function AnnotationCanvas({
                 stroke="transparent"
                 strokeWidth={Math.max(14, a.width + 10)}
                 onMouseDown={(event) => startArrowEdit(event, i, "move")}
-                onClick={() => setSelectedArrowIndex(i)}
+                onClick={() => { setSelectedMarkIndex(null); setSelectedArrowIndex(i); }}
                 onDoubleClick={() => cycleArrowWidth(i)}
                 style={{ pointerEvents: "stroke", cursor: "move" }}
               />
@@ -525,7 +556,7 @@ export function AnnotationCanvas({
           <button
             type="button"
             title="Ikki marta bosing: to'rtburchak/oval"
-            onClick={() => setTool((t) => (t === "oval" ? null : "oval"))}
+            onClick={() => { setSelectedMarkIndex(null); setSelectedArrowIndex(null); setTool((t) => (t === "oval" ? null : "oval")); }}
             onDoubleClick={() => setOvalVariant((v) => (v === "rect" ? "oval" : "rect"))}
             style={{ display: "flex", alignItems: "center", gap: 4, background: tool === "oval" ? "#3a3a3a" : "transparent", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6 }}
           >
@@ -539,7 +570,18 @@ export function AnnotationCanvas({
               </svg>
             )}
           </button>
-          <button type="button" title="Tozalash" onClick={clearAll} style={{ display: "flex", alignItems: "center", background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px" }}>
+          <button
+            type="button"
+            title="Tanlangan shaklni o‘chirish"
+            disabled={selectedMarkIndex === null && selectedArrowIndex === null}
+            onClick={deleteSelected}
+            style={{ display: "flex", alignItems: "center", background: "transparent", border: "none", cursor: selectedMarkIndex === null && selectedArrowIndex === null ? "not-allowed" : "pointer", opacity: selectedMarkIndex === null && selectedArrowIndex === null ? 0.35 : 1, padding: "4px 6px" }}
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24">
+              <path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" stroke="#ffffff" strokeWidth={1.8} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button type="button" title="Hammasini tozalash" onClick={clearAll} style={{ display: "flex", alignItems: "center", background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px" }}>
             <svg width={16} height={16} viewBox="0 0 24 24">
               <path d="M18 6L6 18M6 6l12 12" stroke="#9a9a9a" strokeWidth={2.2} strokeLinecap="round" />
             </svg>

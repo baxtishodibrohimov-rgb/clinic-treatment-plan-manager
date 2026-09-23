@@ -18,7 +18,7 @@ interface RowDef {
 }
 type SlideDef =
   | { kind: "title" }
-  | { kind: "photo"; code: string; rows: RowDef[]; mark: Mark | null; arrows: Arrow[] };
+  | { kind: "photo"; code: string; rows: RowDef[]; marks: Mark[]; arrows: Arrow[] };
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
@@ -118,13 +118,13 @@ export default function PresentationPage({ params }: { params: Promise<{ id: str
   const slideDefs: SlideDef[] = [{ kind: "title" }];
   for (const code of PILL_CODES) {
     const rows = rowsForCode(code);
-    slideDefs.push({ kind: "photo", code, rows, mark: null, arrows: [] });
+    slideDefs.push({ kind: "photo", code, rows, marks: [], arrows: [] });
     const t = imageTypeByCode.get(code);
     const img = t ? imageByTypeId.get(t.id) : null;
     const marks = img ? annotationsByImage[img.id] ?? [] : [];
-    const { mark, arrows } = splitMarks(marks);
-    if (mark || arrows.length > 0) {
-      slideDefs.push({ kind: "photo", code, rows, mark, arrows });
+    const { marks: drawnMarks, arrows } = splitMarks(marks);
+    if (drawnMarks.length > 0 || arrows.length > 0) {
+      slideDefs.push({ kind: "photo", code, rows, marks: drawnMarks, arrows });
     }
   }
   const activeIdx = Math.min(activeSlide, slideDefs.length - 1);
@@ -181,15 +181,15 @@ export default function PresentationPage({ params }: { params: Promise<{ id: str
             const box = containBox(fetched.width, fetched.height, photoBox);
             slide.addImage({ data: fetched.dataUrl, x: box.x, y: box.y, w: box.w, h: box.h });
 
-            if (def.mark) {
-              const mx = box.x + (Math.min(def.mark.x1, def.mark.x2) / 100) * box.w;
-              const my = box.y + (Math.min(def.mark.y1, def.mark.y2) / 100) * box.h;
-              const mw = Math.max(0.05, (Math.abs(def.mark.x2 - def.mark.x1) / 100) * box.w);
-              const mh = Math.max(0.05, (Math.abs(def.mark.y2 - def.mark.y1) / 100) * box.h);
-              slide.addShape(def.mark.shape === "rect" ? pres.ShapeType.rect : pres.ShapeType.ellipse, {
+            for (const mark of def.marks) {
+              const mx = box.x + (Math.min(mark.x1, mark.x2) / 100) * box.w;
+              const my = box.y + (Math.min(mark.y1, mark.y2) / 100) * box.h;
+              const mw = Math.max(0.05, (Math.abs(mark.x2 - mark.x1) / 100) * box.w);
+              const mh = Math.max(0.05, (Math.abs(mark.y2 - mark.y1) / 100) * box.h);
+              slide.addShape(mark.shape === "rect" ? pres.ShapeType.rect : pres.ShapeType.ellipse, {
                 x: mx, y: my, w: mw, h: mh,
                 fill: { type: "none" },
-                line: { color: hexNoHash(COLOR_HEX[def.mark.color]), width: def.mark.width },
+                line: { color: hexNoHash(COLOR_HEX[mark.color]), width: mark.width },
               });
             }
             for (const a of def.arrows) {
@@ -343,7 +343,7 @@ function SlidePanel({
 
   const t = imageTypeByCode.get(def.code);
   const img = t ? imageByTypeId.get(t.id) : null;
-  const hasOverlay = !!def.mark || def.arrows.length > 0;
+  const hasOverlay = def.marks.length > 0 || def.arrows.length > 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -353,7 +353,7 @@ function SlidePanel({
             <AuthenticatedImage src={img.external_url} alt={t?.label ?? def.code} className="h-full w-full object-contain" />
             {hasOverlay && (
               <div className="absolute inset-0">
-                <AnnotationCanvas idSalt={`pres-${def.code}`} marks={[...(def.mark ? [def.mark] : []), ...def.arrows]} />
+                <AnnotationCanvas idSalt={`pres-${def.code}`} marks={[...def.marks, ...def.arrows]} />
               </div>
             )}
           </>

@@ -20,8 +20,8 @@ export function nextWidth(current: number): number {
   return WIDTH_PRESETS[(idx + 1) % WIDTH_PRESETS.length] ?? WIDTH_PRESETS[0];
 }
 
-export function splitMarks(items: AnyMark[]): { mark: Mark | null; arrows: Arrow[] } {
-  const mark = (items.find((i) => i.kind === "mark") as Mark | undefined) ?? null;
+export function splitMarks(items: AnyMark[]): { marks: Mark[]; arrows: Arrow[] } {
+  const marks = items.filter((i) => i.kind === "mark") as Mark[];
   const arrows = items.filter((i) => i.kind === "arrow") as Arrow[];
-  return { mark, arrows };
+  return { marks, arrows };
 }
