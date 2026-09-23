@@ -37,7 +37,7 @@ type CalendarDay = {
   hasConsultation: boolean;
 };
 
-function buildCalendarDays(monthOf: Date, selected: Date, consultationDays: Set<number>): (CalendarDay | null)[] {
+function buildCalendarDays(monthOf: Date, selected: Date, consultationDates: Set<string>): (CalendarDay | null)[] {
   const year = monthOf.getFullYear();
   const month = monthOf.getMonth();
   const today = new Date();
@@ -46,11 +46,12 @@ function buildCalendarDays(monthOf: Date, selected: Date, consultationDays: Set<
   const cells: (CalendarDay | null)[] = [];
   for (let i = 0; i < firstWeekday; i++) cells.push(null);
   for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
     cells.push({
       day,
-      isToday: isSameDay(new Date(year, month, day), today),
-      isSelected: isSameDay(new Date(year, month, day), selected),
-      hasConsultation: consultationDays.has(day),
+      isToday: isSameDay(date, today),
+      isSelected: isSameDay(date, selected),
+      hasConsultation: consultationDates.has(toLocalDateValue(date)),
     });
   }
   return cells;
@@ -59,17 +60,41 @@ function buildCalendarDays(monthOf: Date, selected: Date, consultationDays: Set<
 function CalendarDropdown({
   selectedDate,
   onSelect,
-  consultationDays,
+  consultationDates,
 }: {
   selectedDate: Date;
   onSelect: (d: Date) => void;
-  consultationDays: Set<number>;
+  consultationDates: Set<string>;
 }) {
-  const cells = buildCalendarDays(selectedDate, selectedDate, consultationDays);
+  const [viewMonth, setViewMonth] = useState(() => new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
+  const cells = buildCalendarDays(viewMonth, selectedDate, consultationDates);
+  const changeMonth = (offset: number) => {
+    setViewMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
+  };
   return (
     <div className="absolute top-full left-0 z-50 mt-1.5 w-[260px] rounded-md border border-divider bg-surface p-3 shadow-lg">
-      <div className="mb-2 text-center text-sm font-medium">
-        {UZ_MONTHS[selectedDate.getMonth()]} {selectedDate.getFullYear()}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          title="Oldingi oy"
+          aria-label="Oldingi oy"
+          onClick={() => changeMonth(-1)}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-accent hover:bg-tag-neutral-bg"
+        >
+          ←
+        </button>
+        <div className="text-center text-sm font-medium">
+          {UZ_MONTHS[viewMonth.getMonth()]} {viewMonth.getFullYear()}
+        </div>
+        <button
+          type="button"
+          title="Keyingi oy"
+          aria-label="Keyingi oy"
+          onClick={() => changeMonth(1)}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-accent hover:bg-tag-neutral-bg"
+        >
+          →
+        </button>
       </div>
       <div className="grid grid-cols-7 gap-1">
         {cells.map((c, i) =>
@@ -79,7 +104,7 @@ function CalendarDropdown({
             <button
               key={i}
               type="button"
-              onClick={() => onSelect(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), c.day))}
+              onClick={() => onSelect(new Date(viewMonth.getFullYear(), viewMonth.getMonth(), c.day))}
               className={`aspect-square rounded-md border text-xs ${
                 c.isSelected
                   ? "border-accent bg-accent font-semibold text-white"
@@ -333,14 +358,10 @@ export default function DashboardPage() {
   const selectedCases = cases.filter(
     (item) => item.consultation_datetime && toLocalDateValue(new Date(item.consultation_datetime)) === selectedDateValue,
   );
-  const consultationDaysThisMonth = new Set(
+  const consultationDates = new Set(
     cases
-      .filter((item) => {
-        if (!item.consultation_datetime) return false;
-        const d = new Date(item.consultation_datetime);
-        return d.getFullYear() === selectedDate.getFullYear() && d.getMonth() === selectedDate.getMonth();
-      })
-      .map((item) => new Date(item.consultation_datetime as string).getDate()),
+      .filter((item) => Boolean(item.consultation_datetime))
+      .map((item) => toLocalDateValue(new Date(item.consultation_datetime as string))),
   );
 
   return (
@@ -382,7 +403,7 @@ export default function DashboardPage() {
                 <div className="fixed inset-0 z-40" onClick={() => setCalendarOpen(false)} />
                 <CalendarDropdown
                   selectedDate={selectedDate}
-                  consultationDays={consultationDaysThisMonth}
+                  consultationDates={consultationDates}
                   onSelect={(d) => {
                     setSelectedDate(d);
                     setCalendarOpen(false);
