@@ -42,6 +42,7 @@ from app.services.case_service import (
     auto_classify_pool_images,
     create_case_from_cliniccards_patient,
     create_manual_case,
+    recompute_images_progress,
     save_uploaded_image,
     submit_review,
     upload_to_pool,
@@ -489,6 +490,28 @@ async def upload_case_image(
     bulk upload above assigned incorrectly, or to add one photo at a time."""
     filename, mime_type, data = await _read_upload(file)
     return await asyncio.to_thread(_upload_case_image_blocking, case_id, image_type_id, filename, mime_type, data, user)
+
+
+@router.delete("/{case_id}/images/{image_id}", response_model=CaseDetail)
+def delete_case_image(
+    case_id: uuid.UUID,
+    image_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CaseDetail:
+    """Delete one incorrect assigned or pool image from this case."""
+    case = _get_case_or_404(db, case_id, user)
+    image = db.execute(
+        select(ClinicalImage).where(ClinicalImage.id == image_id, ClinicalImage.case_id == case.id)
+    ).scalar_one_or_none()
+    if not image:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Rasm topilmadi")
+
+    db.delete(image)
+    db.flush()
+    recompute_images_progress(db, case)
+    db.commit()
+    return get_case(case_id, db, user)
 
 
 @router.post("/{case_id}/assign", status_code=status.HTTP_204_NO_CONTENT)

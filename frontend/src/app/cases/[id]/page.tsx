@@ -69,6 +69,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null);
   const [draftAssignments, setDraftAssignments] = useState<Record<string, string>>({});
   const [savingAssignments, setSavingAssignments] = useState(false);
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
 
   const load = async () => {
     const [detail, qs] = await Promise.all([
@@ -165,6 +166,25 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setError(e instanceof ApiError ? e.message : "Rasmlarni saqlashda xatolik");
     } finally {
       setSavingAssignments(false);
+    }
+  };
+
+  const onDeleteImage = async (imageId: string) => {
+    if (!window.confirm("Bu rasm butunlay o‘chirilsinmi? Bu amalni ortga qaytarib bo‘lmaydi.")) return;
+    setDeletingImageId(imageId);
+    setError(null);
+    try {
+      const detail = await api.delete<CaseDetail>(`/api/cases/${id}/images/${imageId}`);
+      setData(detail);
+      setDraftAssignments((current) =>
+        Object.fromEntries(Object.entries(current).filter(([, assignedImageId]) => assignedImageId !== imageId)),
+      );
+      setUploadVersion((version) => version + 1);
+      setFullscreenImage(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Rasmni o‘chirishda xatolik");
+    } finally {
+      setDeletingImageId(null);
     }
   };
 
@@ -455,6 +475,20 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                           >
                             ☁️
                           </button>
+                          {img && !isDraft && (
+                            <button
+                              type="button"
+                              title="Noto‘g‘ri rasmni o‘chirish"
+                              disabled={deletingImageId === img.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void onDeleteImage(img.id);
+                              }}
+                              className="flex h-7 w-7 items-center justify-center rounded border border-red-200 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              {deletingImageId === img.id ? "…" : "×"}
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -594,15 +628,25 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 ) : (
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
                     {visiblePoolImages.map((image) => (
-                      <button
-                        type="button"
-                        disabled={!selectedTypeId}
-                        onClick={() => choosePoolImage(image.id)}
-                        key={image.id}
-                        className="aspect-square overflow-hidden rounded border border-divider bg-tag-neutral-bg transition hover:border-accent hover:ring-2 hover:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {image.external_url && <AuthenticatedImage src={image.external_url} alt="Clinic Cards rasmi" thumbnail className="h-full w-full object-cover" />}
-                      </button>
+                      <div key={image.id} className="relative aspect-square">
+                        <button
+                          type="button"
+                          disabled={!selectedTypeId || deletingImageId === image.id}
+                          onClick={() => choosePoolImage(image.id)}
+                          className="h-full w-full overflow-hidden rounded border border-divider bg-tag-neutral-bg transition hover:border-accent hover:ring-2 hover:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {image.external_url && <AuthenticatedImage src={image.external_url} alt="Clinic Cards rasmi" thumbnail className="h-full w-full object-cover" />}
+                        </button>
+                        <button
+                          type="button"
+                          title="Rasmni o‘chirish"
+                          disabled={deletingImageId === image.id}
+                          onClick={() => void onDeleteImage(image.id)}
+                          className="absolute top-1 right-1 flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-base font-bold text-white shadow hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {deletingImageId === image.id ? "…" : "×"}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}

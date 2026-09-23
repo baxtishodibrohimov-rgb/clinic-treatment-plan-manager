@@ -14,7 +14,7 @@ import type { AnalysisQuestionOut, AnyMark, Arrow, CaseDetail, ClinicalImageOut,
 interface RowDef {
   idx: number;
   question: string;
-  optionCells: { label: string; selected: boolean }[];
+  answer: string;
 }
 type SlideDef =
   | { kind: "title" }
@@ -101,16 +101,10 @@ export default function PresentationPage({ params }: { params: Promise<{ id: str
       if (step.photoCode !== code) return;
       const q = questionByKey.get(`${code}::${step.question}`);
       if (!q || !q.answer || q.answer.answer_value === null || q.answer.answer_value === undefined) return;
-      if (q.template.answer_type === "text" || q.template.answer_type === "measurement") return;
       const val = q.answer.answer_value.value;
-      const optionCells =
-        q.template.answer_type === "boolean"
-          ? [
-              { label: "Ha", selected: val === true },
-              { label: "Yo'q", selected: val === false },
-            ]
-          : q.template.options.map((opt) => ({ label: opt, selected: val === opt }));
-      rows.push({ idx, question: step.question, optionCells });
+      const answer = typeof val === "boolean" ? (val ? "Ha" : "Yo'q") : Array.isArray(val) ? val.join(", ") : String(val).trim();
+      if (!answer) return;
+      rows.push({ idx, question: step.question, answer });
     });
     return rows;
   };
@@ -213,14 +207,19 @@ export default function PresentationPage({ params }: { params: Promise<{ id: str
 
         if (def.rows.length > 0) {
           const tableRows = def.rows.map((r) => [
-            { text: String(r.idx + 1), options: { fill: { color: "E5E5E5" }, color: "000000", bold: true } },
-            { text: r.question, options: { fill: { color: "E5E5E5" }, color: "000000", bold: true } },
-            ...r.optionCells.map((oc) => ({
-              text: oc.label,
-              options: { fill: { color: oc.selected ? "FFFFFF" : "3A3A3A" }, color: oc.selected ? "000000" : "CCCCCC", bold: true, align: "center" as const },
-            })),
+            {
+              text: `${r.question}: ${r.answer}`,
+              options: { fill: { color: "168A4A" }, color: "FFFFFF", bold: true, margin: 0.12 },
+            },
           ]);
-          slide.addTable(tableRows, { x: 0, y: H - tableH, w: W, h: tableH, fontSize: 12, border: { type: "solid", color: "000000", pt: 1 } });
+          slide.addTable(tableRows, {
+            x: 0.25,
+            y: H - tableH + 0.12,
+            w: W - 0.5,
+            h: Math.max(0.3, tableH - 0.24),
+            fontSize: 13,
+            border: { type: "solid", color: "168A4A", pt: 1 },
+          });
         }
       }
 
@@ -362,25 +361,13 @@ function SlidePanel({
         )}
       </div>
       {def.rows.length > 0 && (
-        <table className="w-full border-collapse text-sm" style={{ background: "#000000" }}>
-          <tbody>
-            {def.rows.map((r) => (
-              <tr key={r.idx}>
-                <td className="border-t border-black bg-[#e5e5e5] px-3 py-1.5 font-bold text-black">{r.idx + 1}</td>
-                <td className="border-t border-black bg-[#e5e5e5] px-3 py-1.5 font-bold text-black">{r.question}</td>
-                {r.optionCells.map((oc, i) => (
-                  <td
-                    key={i}
-                    className="border-t border-black px-3 py-1.5 text-center font-bold"
-                    style={{ background: oc.selected ? "#ffffff" : "#3a3a3a", color: oc.selected ? "#000000" : "#cccccc" }}
-                  >
-                    {oc.label}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="flex flex-wrap gap-2 bg-black px-3 py-2.5">
+          {def.rows.map((r) => (
+            <div key={r.idx} className="rounded-md bg-[#168a4a] px-3 py-1.5 text-sm font-semibold text-white shadow-sm">
+              {r.question}: {r.answer}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
