@@ -116,7 +116,7 @@ export function Shell({ children }: { children: ReactNode }) {
       {/* `hidden` creates a scroll container and breaks descendants using
           position: sticky. `clip` still prevents horizontal spill without
           stealing the page's vertical scroll context. */}
-      <main className="min-w-0 overflow-x-clip p-6">{children}</main>
+      <main className="min-w-0 overflow-x-clip p-3 sm:p-6">{children}</main>
     </div>
   );
 }

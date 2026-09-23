@@ -226,7 +226,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[220px_repeat(3,minmax(0,1fr))]">
-          <div className="relative min-h-[260px] overflow-hidden rounded-lg bg-tag-neutral-bg">
+          <div className="relative mx-auto aspect-[3/4] w-full max-w-[220px] overflow-hidden rounded-lg bg-tag-neutral-bg lg:mx-0 lg:max-w-none">
             <button
               type="button"
               onClick={() => {
@@ -235,7 +235,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                 singleInputRef.current?.click();
               }}
               title="Bosh rasmni almashtirish"
-              className="flex h-full min-h-[260px] w-full items-center justify-center"
+              className="flex h-full w-full items-center justify-center"
             >
               {faceImage && faceImage.external_url ? (
                 <AuthenticatedImage
