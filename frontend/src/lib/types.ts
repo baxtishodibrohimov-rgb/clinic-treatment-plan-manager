@@ -199,7 +199,13 @@ export interface Arrow {
   shape: "line" | "arrow";
   kind: "arrow";
 }
-export type AnyMark = Mark | Arrow;
+export interface FreehandPath {
+  points: Array<{ x: number; y: number }>;
+  color: AnnotationColor;
+  width: number;
+  kind: "freehand";
+}
+export type AnyMark = Mark | Arrow | FreehandPath;
 export type AnnotationColor = "red" | "green" | "blue" | "yellow" | "black";
 
 export interface SyncLogOut {

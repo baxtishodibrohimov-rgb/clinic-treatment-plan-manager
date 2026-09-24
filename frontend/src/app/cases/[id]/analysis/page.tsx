@@ -355,8 +355,8 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
 
           <div className="max-h-[48vh] overflow-y-auto p-4 pt-3" style={{ background: "rgba(18,36,26,0.92)" }}>
             {dentalChartJaw && chart && (
-              <div className="mb-3 space-y-2 rounded-lg border border-white/20 bg-white/95 p-3">
-                <h2 className="text-sm font-medium text-ink">
+              <div className="mb-3 space-y-2 rounded-lg border border-emerald-300/20 bg-white/[0.06] p-3 shadow-inner">
+                <h2 className="text-sm font-medium text-white">
                   Tish formulasi (FDI) — {dentalChartJaw === "upper" ? "yuqori jag'" : "pastki jag'"}
                 </h2>
                 <div className="overflow-x-auto">
@@ -366,6 +366,7 @@ export default function CaseAnalysisPage({ params }: { params: Promise<{ id: str
                     onReset={resetChart}
                     jaw={dentalChartJaw}
                     showReset={dentalChartJaw === "upper"}
+                    dark
                   />
                 </div>
               </div>

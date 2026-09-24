@@ -1,4 +1,4 @@
-import type { AnnotationColor, AnyMark, Arrow, Mark } from "./types";
+import type { AnnotationColor, AnyMark, Arrow, FreehandPath, Mark } from "./types";
 
 // Shared between the analysis wizard's fullscreen drawing toolbar and the
 // presentation slide renderer, so a mark drawn once looks identical in both
@@ -20,8 +20,9 @@ export function nextWidth(current: number): number {
   return WIDTH_PRESETS[(idx + 1) % WIDTH_PRESETS.length] ?? WIDTH_PRESETS[0];
 }
 
-export function splitMarks(items: AnyMark[]): { marks: Mark[]; arrows: Arrow[] } {
+export function splitMarks(items: AnyMark[]): { marks: Mark[]; arrows: Arrow[]; paths: FreehandPath[] } {
   const marks = items.filter((i) => i.kind === "mark") as Mark[];
   const arrows = items.filter((i) => i.kind === "arrow") as Arrow[];
-  return { marks, arrows };
+  const paths = items.filter((i) => i.kind === "freehand") as FreehandPath[];
+  return { marks, arrows, paths };
 }

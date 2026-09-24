@@ -9,7 +9,7 @@ import { api, ApiError } from "@/lib/api";
 import { COLOR_HEX, splitMarks } from "@/lib/annotations";
 import { PILL_CODES, WIZARD_FLOW } from "@/lib/wizard-flow";
 import { containBox, fetchImageForExport, hexNoHash } from "@/lib/pptx-export";
-import type { AnalysisQuestionOut, AnyMark, Arrow, CaseDetail, ClinicalImageOut, ImageTypeOut, Mark } from "@/lib/types";
+import type { AnalysisQuestionOut, AnyMark, Arrow, CaseDetail, ClinicalImageOut, FreehandPath, ImageTypeOut, Mark } from "@/lib/types";
 
 interface RowDef {
   idx: number;
@@ -18,7 +18,7 @@ interface RowDef {
 }
 type SlideDef =
   | { kind: "title" }
-  | { kind: "photo"; code: string; rows: RowDef[]; marks: Mark[]; arrows: Arrow[] };
+  | { kind: "photo"; code: string; rows: RowDef[]; marks: Mark[]; arrows: Arrow[]; paths: FreehandPath[] };
 
 function fmt(iso: string | null): string {
   if (!iso) return "—";
@@ -112,13 +112,13 @@ export default function PresentationPage({ params }: { params: Promise<{ id: str
   const slideDefs: SlideDef[] = [{ kind: "title" }];
   for (const code of PILL_CODES) {
     const rows = rowsForCode(code);
-    slideDefs.push({ kind: "photo", code, rows, marks: [], arrows: [] });
+    slideDefs.push({ kind: "photo", code, rows, marks: [], arrows: [], paths: [] });
     const t = imageTypeByCode.get(code);
     const img = t ? imageByTypeId.get(t.id) : null;
     const marks = img ? annotationsByImage[img.id] ?? [] : [];
-    const { marks: drawnMarks, arrows } = splitMarks(marks);
-    if (drawnMarks.length > 0 || arrows.length > 0) {
-      slideDefs.push({ kind: "photo", code, rows, marks: drawnMarks, arrows });
+    const { marks: drawnMarks, arrows, paths } = splitMarks(marks);
+    if (drawnMarks.length > 0 || arrows.length > 0 || paths.length > 0) {
+      slideDefs.push({ kind: "photo", code, rows, marks: drawnMarks, arrows, paths });
     }
   }
   const activeIdx = Math.min(activeSlide, slideDefs.length - 1);
@@ -197,6 +197,22 @@ export default function PresentationPage({ params }: { params: Promise<{ id: str
                 flipH: ax2 < ax1, flipV: ay2 < ay1,
                 line: { color: hexNoHash(COLOR_HEX[a.color]), width: a.width, endArrowType: a.shape === "arrow" ? "triangle" : "none" },
               });
+            }
+            for (const path of def.paths) {
+              for (let pointIndex = 1; pointIndex < path.points.length; pointIndex += 1) {
+                const previous = path.points[pointIndex - 1];
+                const current = path.points[pointIndex];
+                const x1 = box.x + (previous.x / 100) * box.w;
+                const y1 = box.y + (previous.y / 100) * box.h;
+                const x2 = box.x + (current.x / 100) * box.w;
+                const y2 = box.y + (current.y / 100) * box.h;
+                slide.addShape(pres.ShapeType.line, {
+                  x: Math.min(x1, x2), y: Math.min(y1, y2),
+                  w: Math.max(0.001, Math.abs(x2 - x1)), h: Math.max(0.001, Math.abs(y2 - y1)),
+                  flipH: x2 < x1, flipV: y2 < y1,
+                  line: { color: hexNoHash(COLOR_HEX[path.color]), width: path.width, beginArrowType: "none", endArrowType: "none" },
+                });
+              }
             }
           } catch {
             slide.addText("Rasmni yuklab bo'lmadi", { x: 0, y: 0, w: W, h: photoBox.h, color: "888888", fontSize: 18, align: "center", valign: "middle" });
@@ -342,7 +358,7 @@ function SlidePanel({
 
   const t = imageTypeByCode.get(def.code);
   const img = t ? imageByTypeId.get(t.id) : null;
-  const hasOverlay = def.marks.length > 0 || def.arrows.length > 0;
+  const hasOverlay = def.marks.length > 0 || def.arrows.length > 0 || def.paths.length > 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -352,7 +368,7 @@ function SlidePanel({
             <AuthenticatedImage src={img.external_url} alt={t?.label ?? def.code} className="h-full w-full object-contain" />
             {hasOverlay && (
               <div className="absolute inset-0">
-                <AnnotationCanvas idSalt={`pres-${def.code}`} marks={[...def.marks, ...def.arrows]} />
+                <AnnotationCanvas idSalt={`pres-${def.code}`} marks={[...def.marks, ...def.arrows, ...def.paths]} />
               </div>
             )}
           </>

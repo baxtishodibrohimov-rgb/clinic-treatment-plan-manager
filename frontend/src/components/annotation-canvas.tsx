@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { COLOR_HEX, COLOR_KEYS, WIDTH_LABELS, WIDTH_PRESETS, nextWidth, splitMarks } from "@/lib/annotations";
-import type { AnnotationColor, AnyMark, Arrow, Mark } from "@/lib/types";
+import type { AnnotationColor, AnyMark, Arrow, FreehandPath, Mark } from "@/lib/types";
 
-type Tool = "oval" | "arrow" | "line" | null;
+type Tool = "pen" | "oval" | "arrow" | "line" | null;
 type DragPreview = { tool: Exclude<Tool, null>; color: AnnotationColor; x1: number; y1: number; x2: number; y2: number };
 
 const MARKER_PREFIX = "ac-arrow";
@@ -38,11 +38,13 @@ export function AnnotationCanvas({
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [widthPickerOpen, setWidthPickerOpen] = useState(false);
   const [drag, setDrag] = useState<DragPreview | null>(null);
+  const [freehandDraft, setFreehandDraft] = useState<FreehandPath | null>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const [resizing, setResizing] = useState(false);
   const [moving, setMoving] = useState<{ startPt: { x: number; y: number }; orig: Mark } | null>(null);
   const [selectedMarkIndex, setSelectedMarkIndex] = useState<number | null>(null);
   const [selectedArrowIndex, setSelectedArrowIndex] = useState<number | null>(null);
+  const [selectedPathIndex, setSelectedPathIndex] = useState<number | null>(null);
   const [arrowDrag, setArrowDrag] = useState<{
     index: number;
     mode: "move" | "start" | "end";
@@ -50,7 +52,7 @@ export function AnnotationCanvas({
     orig: Arrow;
   } | null>(null);
 
-  const { marks: committedMarks, arrows } = splitMarks(marks);
+  const { marks: committedMarks, arrows, paths } = splitMarks(marks);
   // During resize/move we redraw every mousemove but only tell the parent
   // (which PUTs a new versioned DB row per call) once, on mouseup — else a
   // single drag would write dozens of rows.
@@ -63,7 +65,7 @@ export function AnnotationCanvas({
 
   useEffect(() => {
     if (!resizing && !moving) return;
-    const onMove = (e: MouseEvent) => {
+    const onMove = (e: PointerEvent) => {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect || !rect.width || !rect.height) return;
       const p = pct(e.clientX, e.clientY, rect);
@@ -81,23 +83,25 @@ export function AnnotationCanvas({
       setLiveMark((m) => {
         if (m && selectedMarkIndex !== null) {
           const nextMarks = committedMarks.map((item, index) => (index === selectedMarkIndex ? m : item));
-          onChange?.([...nextMarks, ...arrows]);
+          onChange?.([...nextMarks, ...arrows, ...paths]);
         }
         return null;
       });
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resizing, moving, selectedMarkIndex]);
 
   useEffect(() => {
     if (!arrowDrag) return;
-    const onMove = (e: MouseEvent) => {
+    const onMove = (e: PointerEvent) => {
       const rect = wrapRef.current?.getBoundingClientRect();
       if (!rect || !rect.width || !rect.height) return;
       const point = pct(e.clientX, e.clientY, rect);
@@ -120,37 +124,67 @@ export function AnnotationCanvas({
     const onUp = () => {
       setArrowDrag(null);
       setLiveArrows((next) => {
-        if (next) onChange?.([...displayedMarks, ...next]);
+        if (next) onChange?.([...displayedMarks, ...next, ...paths]);
         return null;
       });
     };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arrowDrag]);
 
-  const handleDragStart = (e: React.MouseEvent) => {
+  const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!editable || !tool || resizing || moving) return;
+    if ((e.target as Element).closest("button")) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
     const rect = e.currentTarget.getBoundingClientRect();
     const p = pct(e.clientX, e.clientY, rect);
     dragStart.current = p;
-    setDrag({ tool, color, x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+    if (tool === "pen") {
+      setFreehandDraft({ kind: "freehand", points: [p], color, width });
+    } else {
+      setDrag({ tool, color, x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+    }
   };
-  const handleDragMove = (e: React.MouseEvent) => {
+  const handleDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragStart.current) return;
+    e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
     const p = pct(e.clientX, e.clientY, rect);
+    if (tool === "pen") {
+      setFreehandDraft((draft) => {
+        if (!draft) return draft;
+        const last = draft.points[draft.points.length - 1];
+        if (last && Math.hypot(p.x - last.x, p.y - last.y) < 0.15) return draft;
+        return { ...draft, points: [...draft.points, p] };
+      });
+      return;
+    }
     setDrag((d) => (d ? { ...d, x2: p.x, y2: p.y } : d));
   };
-  const handleDragEnd = (e: React.MouseEvent) => {
+  const handleDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
     const start = dragStart.current;
     dragStart.current = null;
     setDrag(null);
     if (!start || !tool) return;
+    e.preventDefault();
+    if (tool === "pen") {
+      if (freehandDraft && freehandDraft.points.length > 1) {
+        onChange?.([...committedMarks, ...arrows, ...paths, freehandDraft]);
+        setSelectedPathIndex(paths.length);
+        setSelectedMarkIndex(null);
+        setSelectedArrowIndex(null);
+      }
+      setFreehandDraft(null);
+      return;
+    }
     const rect = e.currentTarget.getBoundingClientRect();
     const end = pct(e.clientX, e.clientY, rect);
     const dist = Math.hypot(end.x - start.x, end.y - start.y);
@@ -169,32 +203,34 @@ export function AnnotationCanvas({
         width,
         shape: ovalVariant,
       };
-      onChange?.([...committedMarks, next, ...arrows]);
+      onChange?.([...committedMarks, next, ...arrows, ...paths]);
       setSelectedMarkIndex(committedMarks.length);
       setSelectedArrowIndex(null);
+      setSelectedPathIndex(null);
     } else if (dist >= 1) {
       const next: Arrow = { kind: "arrow", x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width, shape: tool };
-      onChange?.([...committedMarks, ...arrows, next]);
+      onChange?.([...committedMarks, ...arrows, next, ...paths]);
       setSelectedArrowIndex(arrows.length);
       setSelectedMarkIndex(null);
+      setSelectedPathIndex(null);
     }
     setTool(null);
   };
 
   const cycleMarkWidth = (idx: number) => {
     const nextMarks = committedMarks.map((item, index) => (index === idx ? { ...item, width: nextWidth(item.width) } : item));
-    onChange?.([...nextMarks, ...arrows]);
+    onChange?.([...nextMarks, ...arrows, ...paths]);
   };
   const cycleArrowWidth = (idx: number) => {
     const next = arrows.map((a, i) => (i === idx ? { ...a, width: nextWidth(a.width) } : a));
-    onChange?.([...committedMarks, ...next]);
+    onChange?.([...committedMarks, ...next, ...paths]);
   };
-  const startResize = (e: React.MouseEvent) => {
+  const startResize = (e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
     setResizing(true);
   };
-  const startMove = (e: React.MouseEvent) => {
+  const startMove = (e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
     if (!mark) return;
@@ -202,31 +238,38 @@ export function AnnotationCanvas({
     if (!rect) return;
     setMoving({ startPt: pct(e.clientX, e.clientY, rect), orig: mark });
   };
-  const startArrowEdit = (e: React.MouseEvent, index: number, mode: "move" | "start" | "end") => {
+  const startArrowEdit = (e: React.PointerEvent, index: number, mode: "move" | "start" | "end") => {
     e.stopPropagation();
     e.preventDefault();
     const rect = wrapRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTool(null);
     setSelectedMarkIndex(null);
+    setSelectedPathIndex(null);
     setSelectedArrowIndex(index);
     setArrowDrag({ index, mode, startPt: pct(e.clientX, e.clientY, rect), orig: arrows[index] });
   };
   const clearAll = () => {
     setSelectedMarkIndex(null);
     setSelectedArrowIndex(null);
+    setSelectedPathIndex(null);
     setTool(null);
     onChange?.([]);
   };
   const deleteSelected = () => {
     if (selectedMarkIndex !== null) {
-      onChange?.([...committedMarks.filter((_, index) => index !== selectedMarkIndex), ...arrows]);
+      onChange?.([...committedMarks.filter((_, index) => index !== selectedMarkIndex), ...arrows, ...paths]);
       setSelectedMarkIndex(null);
       return;
     }
     if (selectedArrowIndex !== null) {
-      onChange?.([...committedMarks, ...arrows.filter((_, index) => index !== selectedArrowIndex)]);
+      onChange?.([...committedMarks, ...arrows.filter((_, index) => index !== selectedArrowIndex), ...paths]);
       setSelectedArrowIndex(null);
+      return;
+    }
+    if (selectedPathIndex !== null) {
+      onChange?.([...committedMarks, ...arrows, ...paths.filter((_, index) => index !== selectedPathIndex)]);
+      setSelectedPathIndex(null);
     }
   };
 
@@ -242,10 +285,11 @@ export function AnnotationCanvas({
   return (
     <div
       ref={wrapRef}
-      style={{ position: "relative", width: "100%", height: "100%" }}
-      onMouseDown={editable ? handleDragStart : undefined}
-      onMouseMove={editable ? handleDragMove : undefined}
-      onMouseUp={editable ? handleDragEnd : undefined}
+      style={{ position: "relative", width: "100%", height: "100%", touchAction: editable ? "none" : "auto" }}
+      onPointerDown={editable ? handleDragStart : undefined}
+      onPointerMove={editable ? handleDragMove : undefined}
+      onPointerUp={editable ? handleDragEnd : undefined}
+      onPointerCancel={editable ? handleDragEnd : undefined}
     >
       {editable && tool && (
         <div style={{ position: "absolute", inset: 0, zIndex: 5, cursor: "crosshair" }} />
@@ -287,7 +331,7 @@ export function AnnotationCanvas({
                 fill="none"
                 stroke={COLOR_HEX[drawnMark.color]}
                 strokeWidth={drawnMark.width}
-                onClick={editable ? () => { setTool(null); setSelectedArrowIndex(null); setSelectedMarkIndex(index); } : undefined}
+                onClick={editable ? () => { setTool(null); setSelectedArrowIndex(null); setSelectedPathIndex(null); setSelectedMarkIndex(index); } : undefined}
                 onDoubleClick={editable ? () => cycleMarkWidth(index) : undefined}
                 style={editable ? { pointerEvents: "auto", cursor: "pointer" } : undefined}
               />
@@ -300,7 +344,7 @@ export function AnnotationCanvas({
                 fill="none"
                 stroke={COLOR_HEX[drawnMark.color]}
                 strokeWidth={drawnMark.width}
-                onClick={editable ? () => { setTool(null); setSelectedArrowIndex(null); setSelectedMarkIndex(index); } : undefined}
+                onClick={editable ? () => { setTool(null); setSelectedArrowIndex(null); setSelectedPathIndex(null); setSelectedMarkIndex(index); } : undefined}
                 onDoubleClick={editable ? () => cycleMarkWidth(index) : undefined}
                 style={editable ? { pointerEvents: "auto", cursor: "pointer" } : undefined}
               />
@@ -320,7 +364,7 @@ export function AnnotationCanvas({
               strokeWidth={a.width}
               markerEnd={a.shape === "arrow" ? `url(#${MARKER_PREFIX}-${idSalt}-${a.color})` : undefined}
               onDoubleClick={editable ? () => cycleArrowWidth(i) : undefined}
-              onClick={editable ? () => { setTool(null); setSelectedMarkIndex(null); setSelectedArrowIndex(i); } : undefined}
+              onClick={editable ? () => { setTool(null); setSelectedMarkIndex(null); setSelectedPathIndex(null); setSelectedArrowIndex(i); } : undefined}
               style={editable ? { pointerEvents: "auto", cursor: "move" } : undefined}
             />
             {editable && (
@@ -331,8 +375,8 @@ export function AnnotationCanvas({
                 y2={`${a.y2}%`}
                 stroke="transparent"
                 strokeWidth={Math.max(14, a.width + 10)}
-                onMouseDown={(event) => startArrowEdit(event, i, "move")}
-                onClick={() => { setSelectedMarkIndex(null); setSelectedArrowIndex(i); }}
+                onPointerDown={(event) => startArrowEdit(event, i, "move")}
+                onClick={() => { setSelectedMarkIndex(null); setSelectedPathIndex(null); setSelectedArrowIndex(i); }}
                 onDoubleClick={() => cycleArrowWidth(i)}
                 style={{ pointerEvents: "stroke", cursor: "move" }}
               />
@@ -383,6 +427,50 @@ export function AnnotationCanvas({
         )}
       </svg>
 
+      <svg
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 4 }}
+      >
+        {[...paths, ...(freehandDraft ? [freehandDraft] : [])].map((path, index) => {
+          const d = path.points.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ");
+          const selected = index === selectedPathIndex && index < paths.length;
+          return (
+            <g key={`freehand-${index}`}>
+              <path
+                d={d}
+                fill="none"
+                stroke={COLOR_HEX[path.color]}
+                strokeWidth={path.width}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+                opacity={selected ? 0.75 : 1}
+              />
+              {editable && index < paths.length && (
+                <path
+                  d={d}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={Math.max(14, path.width + 10)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    setTool(null);
+                    setSelectedMarkIndex(null);
+                    setSelectedArrowIndex(null);
+                    setSelectedPathIndex(index);
+                  }}
+                  style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+
       {editable && selectedArrowIndex !== null && displayedArrows[selectedArrowIndex] && (
         <>
           {(["start", "end"] as const).map((handle) => {
@@ -393,7 +481,7 @@ export function AnnotationCanvas({
               <div
                 key={handle}
                 title={handle === "start" ? "Boshlanish nuqtasini o‘zgartirish" : "Uzunligini o‘zgartirish"}
-                onMouseDown={(event) => startArrowEdit(event, selectedArrowIndex, handle)}
+                onPointerDown={(event) => startArrowEdit(event, selectedArrowIndex, handle)}
                 style={{
                   position: "absolute",
                   left: `${x}%`,
@@ -416,12 +504,12 @@ export function AnnotationCanvas({
       {editable && mark && (
         <>
           <div
-            onMouseDown={startMove}
+            onPointerDown={startMove}
             title="Ko'chirish"
             style={{ position: "absolute", left: `${markX}%`, top: `${markY}%`, width: `${markW}%`, height: `${markH}%`, cursor: "move", zIndex: 6 }}
           />
           <div
-            onMouseDown={startResize}
+            onPointerDown={startResize}
             title="O'lchamini o'zgartirish"
             style={{
               position: "absolute",
@@ -532,8 +620,23 @@ export function AnnotationCanvas({
 
           <button
             type="button"
+            title="Ruchka — erkin chizish"
+            onClick={() => {
+              setSelectedMarkIndex(null);
+              setSelectedArrowIndex(null);
+              setSelectedPathIndex(null);
+              setTool((current) => (current === "pen" ? null : "pen"));
+            }}
+            style={{ display: "flex", alignItems: "center", background: tool === "pen" ? "#3a3a3a" : "transparent", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6 }}
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24">
+              <path d="M4 20c3-6 4-12 10-15 2-1 4 1 3 3-2 5-8 6-10 11m0 0 4-1" fill="none" stroke={tool === "pen" ? "#ffffff" : "#9a9a9a"} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
             title="Chiziq"
-            onClick={() => setTool((t) => (t === "line" ? null : "line"))}
+            onClick={() => { setSelectedMarkIndex(null); setSelectedArrowIndex(null); setSelectedPathIndex(null); setTool((t) => (t === "line" ? null : "line")); }}
             style={{ display: "flex", alignItems: "center", gap: 4, background: tool === "line" ? "#3a3a3a" : "transparent", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6 }}
           >
             <svg width={16} height={16} viewBox="0 0 24 24">
@@ -545,7 +648,7 @@ export function AnnotationCanvas({
           <button
             type="button"
             title="Strelka"
-            onClick={() => setTool((t) => (t === "arrow" ? null : "arrow"))}
+            onClick={() => { setSelectedMarkIndex(null); setSelectedArrowIndex(null); setSelectedPathIndex(null); setTool((t) => (t === "arrow" ? null : "arrow")); }}
             style={{ display: "flex", alignItems: "center", gap: 4, background: tool === "arrow" ? "#3a3a3a" : "transparent", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6 }}
           >
             <svg width={16} height={16} viewBox="0 0 24 24">
@@ -556,7 +659,7 @@ export function AnnotationCanvas({
           <button
             type="button"
             title="Ikki marta bosing: to'rtburchak/oval"
-            onClick={() => { setSelectedMarkIndex(null); setSelectedArrowIndex(null); setTool((t) => (t === "oval" ? null : "oval")); }}
+            onClick={() => { setSelectedMarkIndex(null); setSelectedArrowIndex(null); setSelectedPathIndex(null); setTool((t) => (t === "oval" ? null : "oval")); }}
             onDoubleClick={() => setOvalVariant((v) => (v === "rect" ? "oval" : "rect"))}
             style={{ display: "flex", alignItems: "center", gap: 4, background: tool === "oval" ? "#3a3a3a" : "transparent", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6 }}
           >
@@ -573,9 +676,9 @@ export function AnnotationCanvas({
           <button
             type="button"
             title="Tanlangan shaklni o‘chirish"
-            disabled={selectedMarkIndex === null && selectedArrowIndex === null}
+            disabled={selectedMarkIndex === null && selectedArrowIndex === null && selectedPathIndex === null}
             onClick={deleteSelected}
-            style={{ display: "flex", alignItems: "center", background: "transparent", border: "none", cursor: selectedMarkIndex === null && selectedArrowIndex === null ? "not-allowed" : "pointer", opacity: selectedMarkIndex === null && selectedArrowIndex === null ? 0.35 : 1, padding: "4px 6px" }}
+            style={{ display: "flex", alignItems: "center", background: "transparent", border: "none", cursor: selectedMarkIndex === null && selectedArrowIndex === null && selectedPathIndex === null ? "not-allowed" : "pointer", opacity: selectedMarkIndex === null && selectedArrowIndex === null && selectedPathIndex === null ? 0.35 : 1, padding: "4px 6px" }}
           >
             <svg width={16} height={16} viewBox="0 0 24 24">
               <path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" stroke="#ffffff" strokeWidth={1.8} fill="none" strokeLinecap="round" strokeLinejoin="round" />
