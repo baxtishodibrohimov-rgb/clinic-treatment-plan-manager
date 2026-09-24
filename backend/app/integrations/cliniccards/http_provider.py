@@ -46,6 +46,14 @@ def _stable_id(value: Any) -> str:
     text = str(value or "")
     return text if len(text) <= 255 else sha256(text.encode("utf-8")).hexdigest()
 
+def _same_card_number(left: Any, right: Any) -> bool:
+    a, b = str(left or "").strip(), str(right or "").strip()
+    if not a or not b:
+        return False
+    if a.casefold() == b.casefold():
+        return True
+    return a.isdigit() and b.isdigit() and int(a) == int(b)
+
 def _map_patient(raw: dict[str, Any]) -> CliniccardsPatient:
     name = " ".join(str(raw.get(k) or "").strip() for k in ("lastname", "firstname", "middlename")).strip()
     return CliniccardsPatient(
@@ -105,6 +113,11 @@ class HttpCliniccardsAdapter(CliniccardsAdapter):
             raise
         rows = _as_list(payload); raw = rows[0] if rows else payload.get("data") if isinstance(payload, dict) else None
         return _map_patient(raw) if isinstance(raw, dict) else None
+
+    async def get_patient_by_card_number(self, card_number: str) -> CliniccardsPatient | None:
+        rows = _as_list(await self._get(self._settings.cliniccards_patients_path))
+        raw = next((row for row in rows if _same_card_number(row.get("code"), card_number)), None)
+        return _map_patient(raw) if raw else None
 
     async def get_appointments(self, params: GetAppointmentsParams | None = None) -> list[CliniccardsAppointment]:
         now = datetime.now(timezone.utc); start = params.from_ if params and params.from_ else now - timedelta(days=self._settings.cliniccards_sync_days_back); end = params.to if params and params.to else now + timedelta(days=self._settings.cliniccards_sync_days_ahead)

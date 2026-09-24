@@ -28,6 +28,9 @@ class CliniccardsAdapter(ABC):
     async def get_patient(self, patient_id: str) -> CliniccardsPatient | None: ...
 
     @abstractmethod
+    async def get_patient_by_card_number(self, card_number: str) -> CliniccardsPatient | None: ...
+
+    @abstractmethod
     async def get_appointments(self, params: GetAppointmentsParams | None = None) -> list[CliniccardsAppointment]: ...
 
     @abstractmethod

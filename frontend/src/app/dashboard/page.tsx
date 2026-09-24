@@ -201,7 +201,7 @@ function NewPatientModal({ onClose, onCreated }: { onClose: () => void; onCreate
       onCreated();
       onClose();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Xatolik");
+      setError(e instanceof ApiError || e instanceof Error ? e.message : "Noma’lum xatolik yuz berdi");
     } finally {
       setSaving(false);
     }

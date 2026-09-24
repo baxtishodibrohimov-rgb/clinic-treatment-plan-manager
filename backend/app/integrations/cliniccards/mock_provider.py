@@ -90,6 +90,19 @@ class MockCliniccardsAdapter(CliniccardsAdapter):
         seed = next((s for s in PATIENT_SEEDS if s.patient_id == patient_id), None)
         return _to_patient(seed) if seed else None
 
+    async def get_patient_by_card_number(self, card_number: str) -> CliniccardsPatient | None:
+        normalized = card_number.strip().casefold()
+        seed = next(
+            (
+                s
+                for s in PATIENT_SEEDS
+                if s.patient_id.casefold() == normalized
+                or s.patient_id.removeprefix("CC-").lstrip("0") == normalized.lstrip("0")
+            ),
+            None,
+        )
+        return _to_patient(seed) if seed else None
+
     async def get_appointments(self, params: GetAppointmentsParams | None = None) -> list[CliniccardsAppointment]:
         appts = [_to_appointment(s) for s in PATIENT_SEEDS]
         if params:

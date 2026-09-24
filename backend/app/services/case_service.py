@@ -268,9 +268,16 @@ async def create_case_from_cliniccards_patient(
     above, this keeps the real cliniccards_patient_id — not a synthesized
     "MANUAL-..." one — so the case's patient identity matches Cliniccards
     exactly and we can pull that patient's existing images immediately."""
-    patient = await adapter.get_patient(cliniccards_patient_id)
+    entered_card_number = cliniccards_patient_id.strip()
+    patient = await adapter.get_patient(entered_card_number)
     if not patient:
-        raise ValueError("Bu karta raqami bo'yicha Cliniccardsda bemor topilmadi")
+        patient = await adapter.get_patient_by_card_number(entered_card_number)
+    if not patient:
+        raise ValueError(f"Clinic Cards'da {entered_card_number} raqamli bemor kartasi topilmadi")
+
+    # The visible card number (`code`) and Clinic Cards' internal patient_id
+    # are different fields. Store and sync with the canonical patient_id.
+    cliniccards_patient_id = patient.patient_id
 
     await upsert_patient_cache(db, adapter, cliniccards_patient_id)
 
